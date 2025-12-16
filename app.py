@@ -104,6 +104,7 @@ elif st.session_state.page == 'project':
     st.markdown("---")
     
     # Section 2: The three cross-sections we need
+    st.markdown("### 2. Cross-Section Analysis")
     profile.render_profile_section()
     st.markdown("---")
     
