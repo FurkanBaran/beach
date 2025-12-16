@@ -6,4 +6,5 @@ __pycache__/
 app.zip
 aciklamalar.md
 çalıştırmak için.txt
+.gitignore
 .devcontainer/
