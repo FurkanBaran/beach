@@ -92,6 +92,18 @@ if 'coord_version' not in st.session_state:
     st.session_state.coord_version = 0
 
 def render_profile_section():
+    # Ensure session state is initialized
+    if 'current_section' not in st.session_state:
+        st.session_state.current_section = 'A'
+    if 'sections' not in st.session_state:
+        st.session_state.sections = {
+            'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
+            'B': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
+            'C': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False}
+        }
+    if 'coord_version' not in st.session_state:
+        st.session_state.coord_version = 0
+    
     bathymetry_ds = load_bathymetry()
 
     st.markdown("---")
