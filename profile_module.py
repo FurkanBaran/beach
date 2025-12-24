@@ -174,6 +174,20 @@ PARABOL_END_P1 = {'lat': 41.1778, 'lon': 29.6253}  # 41°10'40"N 29°37'31"E
 PARABOL_END_P2 = {'lat': 41.1750, 'lon': 29.6292}  # 41°10'30"N 29°37'45"E
 
 def render_profile_section():
+    # Ensure session state is initialized
+    if 'sections' not in st.session_state:
+        st.session_state.sections = {
+            'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
+            'B': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
+            'C': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False}
+        }
+    
+    if 'current_section' not in st.session_state:
+        st.session_state.current_section = 'A'
+    
+    if 'coord_version' not in st.session_state:
+        st.session_state.coord_version = 0
+    
     bathymetry_ds = load_bathymetry()
 
     st.markdown("---")
@@ -295,6 +309,7 @@ def render_profile_section():
             
             fig_combined = go.Figure()
             colors = {'A': '#2563EB', 'B': '#DC2626', 'C': '#FACC15'}
+            sill_colors = {'A': '#006400', 'B': '#00FF00', 'C': '#90EE90'}  # Dark green, normal green, light green
             
             for sec_name in ['A', 'B', 'C']:
                 sec_data = st.session_state.sections[sec_name]
@@ -313,6 +328,33 @@ def render_profile_section():
                         name=f'{sec_name} Design',
                         line=dict(color=colors[sec_name], width=2, dash='dash')
                     ))
+                    
+                    # Add sill location marker
+                    if sec_data.get('sill_distance') is not None and sec_data.get('sill_depth') is not None:
+                        fig_combined.add_trace(go.Scatter(
+                            x=[sec_data['sill_distance']], 
+                            y=[sec_data['sill_depth']], 
+                            mode='markers',
+                            name=f'{sec_name} Sill',
+                            marker=dict(
+                                symbol='diamond',
+                                size=12,
+                                color=sill_colors[sec_name],
+                                line=dict(color='#000000', width=1.5)
+                            ),
+                            hovertemplate=f'{sec_name} Sill<br>Distance: %{{x:.1f}} m<br>Depth: %{{y:.2f}} m<extra></extra>'
+                        ))
+                        
+                        # Add vertical line downward from sill
+                        min_depth = min(min(sec_data['bathy_depth']), min(sec_data['user_depth']))
+                        fig_combined.add_shape(
+                            type="line",
+                            x0=sec_data['sill_distance'],
+                            y0=sec_data['sill_depth'],
+                            x1=sec_data['sill_distance'],
+                            y1=min_depth - 1,
+                            line=dict(color=sill_colors[sec_name], width=2, dash='dash')
+                        )
             
             fig_combined.update_layout(
                 xaxis_title="Distance (m)", 
