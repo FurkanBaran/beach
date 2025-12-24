@@ -113,7 +113,7 @@ except:
 **Ne yapıyor?**
 - `try/except`: Hata yakalama. Eğer resim bulunamazsa uyarı göster.
 - `st.image()`: Resim göster
-- `width='stretch'`: Resmi tam genişlikte göster
+- `width='stretch'`: Resmi tam genişlikte göster (eski `use_container_width=True` yerine)
 
 #### Satır 30-32: Başlık ve Alt Başlık
 
@@ -190,11 +190,12 @@ with col_form:
 #### Satır 69-71: Footer
 
 ```python
+# Footer at the bottom
 st.markdown("---")
 st.caption("© 2025 Coastal Engineering Solutions | Ağlayankaya Beach Nourishment Project")
 ```
 
-**Ne yapıyor?** Alt bilgi yazısı.
+**Ne yapıyor?** Alt bilgi yazısı. (Not: Kullanıcı tercihine göre bu footer kaldırılabilir)
 
 ---
 
@@ -403,14 +404,14 @@ def extract_depth_profile(ds, point1, point2, num_points=50):
 
 ---
 
-### Satır 80-92: Session State Başlatma
+### Satır 80-92: Session State Başlatma (Modül Seviyesi)
 
 ```python
 if 'sections' not in st.session_state:
     st.session_state.sections = {
         'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
-        'B': {...},
-        'C': {...}
+        'B': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
+        'C': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False}
     }
 
 if 'current_section' not in st.session_state:
@@ -421,6 +422,7 @@ if 'coord_version' not in st.session_state:
 ```
 
 **Ne yapıyor?**
+- **Modül seviyesinde** session state başlatma (dosya yüklendiğinde çalışır)
 - `sections`: Her kesit için verileri saklar
   - `points`: Haritada seçilen 2 nokta (lat/lon)
   - `bathy_dist`, `bathy_depth`: NetCDF'den okunan gerçek derinlik profili
@@ -429,24 +431,42 @@ if 'coord_version' not in st.session_state:
 - `current_section`: Şu anda hangi kesitte çalışıyoruz (A, B, C veya ALL)
 - `coord_version`: Koordinat widget'larını yenilemek için versiyon numarası
 
+**Not:** `render_profile_section()` fonksiyonunun içinde de aynı kontroller yapılır (güvenlik için çift kontrol)
+
 ---
 
 ### Satır 94-377: render_profile_section() Fonksiyonu
 
 Bu fonksiyon kesit analizi arayüzünü oluşturur.
 
-#### Satır 95-99: Başlangıç
+#### Satır 94-111: Başlangıç ve Session State Kontrolü
 
 ```python
 def render_profile_section():
+    # Ensure session state is initialized
+    if 'current_section' not in st.session_state:
+        st.session_state.current_section = 'A'
+    if 'sections' not in st.session_state:
+        st.session_state.sections = {
+            'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
+            'B': {...},
+            'C': {...}
+        }
+    if 'coord_version' not in st.session_state:
+        st.session_state.coord_version = 0
+    
     bathymetry_ds = load_bathymetry()
     st.markdown("---")
     current = st.session_state.current_section
 ```
 
-**Ne yapıyor?** Batimetri verisini yükle ve mevcut kesiti al.
+**Ne yapıyor?**
+- Fonksiyonun başında session state'in başlatıldığından emin olur (güvenlik kontrolü)
+- Eğer session state yoksa başlatır
+- Batimetri verisini yükler ve mevcut kesiti alır
+- **Neden önemli?** Bazı durumlarda (örneğin uygulama ilk açıldığında) session state henüz başlatılmamış olabilir. Bu kontrol hataları önler.
 
-#### Satır 104-130: Navigasyon Butonları
+#### Satır 113-138: Navigasyon Butonları
 
 ```python
 st.markdown("### Section Navigation")
@@ -462,54 +482,89 @@ with col_a:
 **Ne yapıyor?**
 - 4 buton: A-A', B-B', C-C' ve All Results
 - Tamamlanan kesitlerin yanında "[Done]" yazıyor
-- Butona basınca ilgili kesit açılıyor
+- Aktif kesit mavi (primary), diğerleri gri (secondary)
+- Butona basınca ilgili kesit açılıyor ve sayfa yenilenir
 
-#### Satır 132-214: ALL RESULTS VIEW
+#### Satır 140-219: ALL RESULTS VIEW
 
 ```python
 if current == 'ALL':
     st.info("Viewing: **All Results Summary**")
+    st.markdown("---")
     
     completed_sections = [name for name, data in st.session_state.sections.items() if data['completed']]
     
     if not completed_sections:
-        st.warning("No sections completed yet...")
+        st.warning("No sections completed yet. Please complete at least one section to view results.")
     else:
+        st.markdown("## All Cross-Section Profiles")
+        
         for sec_name in ['A', 'B', 'C']:
             sec_data = st.session_state.sections[sec_name]
             if sec_data['completed']:
-                # Grafik çiz
+                st.markdown(f"### Section {sec_name}-{sec_name}'")
+                
                 fig = go.Figure()
-                fig.add_trace(go.Scatter(...))
+                fig.add_trace(go.Scatter(x=sec_data['bathy_dist'], y=sec_data['bathy_depth'], ...))
+                fig.add_trace(go.Scatter(x=sec_data['user_dist'], y=sec_data['user_depth'], ...))
                 st.plotly_chart(fig)
+                
+                # Metrikler gösterilir
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Distance", f"{sec_data['bathy_dist'][-1]:.1f} m")
+                col2.metric("Max Depth (Bathy)", f"{abs(min(sec_data['bathy_depth'])):.2f} m")
+                col3.metric("Max Depth (Design)", f"{abs(min(sec_data['user_depth'])):.2f} m")
+        
+        st.markdown("## Combined View - All Sections")
+        fig_combined = go.Figure()
+        colors = {'A': '#2563EB', 'B': '#DC2626', 'C': '#FACC15'}
+        # Tüm kesitler tek grafikte
 ```
 
 **Ne yapıyor?**
 - Tamamlanan tüm kesitlerin grafiklerini tek sayfada gösterir
-- Her kesit için batimetri vs tasarım karşılaştırması
-- En altta Combined View: Tüm kesitler tek grafikte
+- Her kesit için ayrı grafik: batimetri (mavi) vs tasarım (kırmızı, kesikli)
+- Her kesit için metrikler: toplam mesafe, maksimum derinlikler
+- En altta Combined View: Tüm kesitler tek grafikte (A: mavi, B: kırmızı, C: sarı)
 
-#### Satır 216-377: SECTION EDITING VIEW
+#### Satır 221-388: SECTION EDITING VIEW
 
-##### Satır 221-254: Harita ve Nokta Seçimi
+##### Satır 228-255: Harita ve Nokta Seçimi
 
 ```python
 m = folium.Map(location=[41.175354, 29.626743], zoom_start=15)
 folium.TileLayer(
     tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     attr='Esri',
-    name='Satellite'
+    name='Satellite',
+    overlay=False,
+    control=True
 ).add_to(m)
+map_colors = {'A': 'blue', 'B': 'green', 'C': 'orange'}
+
+# Tüm kesitlerin noktalarını göster
+for sec_name, sec_data in st.session_state.sections.items():
+    if sec_data['points']:
+        color = map_colors.get(sec_name, 'gray')
+        for idx, pt in enumerate(sec_data['points']):
+            folium.Marker([pt['lat'], pt['lon']], ...).add_to(m)
+        if len(sec_data['points']) == 2:
+            folium.PolyLine([...], color=color if sec_name == current else 'gray', ...).add_to(m)
 ```
 
 **Ne yapıyor?**
-- Folium haritası oluştur
-- Esri uydu görüntüsü katmanı ekle
+- Folium haritası oluştur (Şile Ağlayankaya koordinatları)
+- Esri uydu görüntüsü katmanı ekle (satellite view)
+- Tüm kesitlerin seçilen noktalarını göster (aktif kesit renkli, diğerleri gri)
+- Aktif kesit için çizgi kalın, diğerleri ince
 - Kullanıcı haritaya tıklayarak 2 nokta seçebilir
 
-##### Satır 256-272: Harita Tıklamalarını İşleme
+##### Satır 257-274: Harita Tıklamalarını İşleme
 
 ```python
+m.add_child(folium.LatLngPopup())
+map_data = st_folium(m, height=400, use_container_width=True, key=f"map_{current}")
+
 if map_data and map_data.get('last_clicked'):
     lat = map_data['last_clicked']['lat']
     lon = map_data['last_clicked']['lng']
@@ -518,6 +573,7 @@ if map_data and map_data.get('last_clicked'):
         new_point = True
         if section['points']:
             last = section['points'][-1]
+            # Aynı noktaya tekrar tıklanmış mı kontrol et
             if abs(last['lat'] - lat) < 0.0001 and abs(last['lon'] - lon) < 0.0001:
                 new_point = False
         
@@ -528,29 +584,64 @@ if map_data and map_data.get('last_clicked'):
 ```
 
 **Ne yapıyor?**
+- `st_folium()` ile haritayı Streamlit'e göm
 - Haritada tıklama algılandıysa koordinatları al
 - Eğer 2'den az nokta varsa ve yeni bir nokta ise ekle
-- Koordinat versiyonunu artır (widget'ları yenilemek için)
+- Aynı noktaya tekrar tıklanmışsa yok say
+- Koordinat versiyonunu artır (manuel koordinat formunu yenilemek için)
+- Sayfayı yenile
 
-##### Satır 274-310: Manuel Koordinat Formu
+##### Satır 276-310: Manuel Koordinat Formu
 
 ```python
 st.markdown("#### Manual Coordinates")
 
 v = st.session_state.coord_version
 default_lat1 = section['points'][0]['lat'] if section['points'] else 41.175354
-lat1 = st.number_input("Latitude", value=default_lat1, format="%.6f", key=f"lat1_{current}_{v}")
+default_lon1 = section['points'][0]['lon'] if section['points'] else 29.626743
+default_lat2 = section['points'][1]['lat'] if len(section['points']) > 1 else 41.175000
+default_lon2 = section['points'][1]['lon'] if len(section['points']) > 1 else 29.627000
+
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown(f"**Point {current}**")
+    lat1 = st.number_input("Latitude", value=default_lat1, format="%.6f", key=f"lat1_{current}_{v}")
+    lon1 = st.number_input("Longitude", value=default_lon1, format="%.6f", key=f"lon1_{current}_{v}")
+with col2:
+    st.markdown(f"**Point {current}'**")
+    lat2 = st.number_input("Latitude ", value=default_lat2, format="%.6f", key=f"lat2_{current}_{v}")
+    lon2 = st.number_input("Longitude ", value=default_lon2, format="%.6f", key=f"lon2_{current}_{v}")
+
+col_apply, col_reset = st.columns(2)
+with col_apply:
+    if st.button("Apply Coordinates", key=f"apply_{current}", use_container_width=True):
+        section['points'] = [{'lat': lat1, 'lon': lon1}, {'lat': lat2, 'lon': lon2}]
+        st.rerun()
+with col_reset:
+    if st.button("Reset Points", key=f"reset_{current}", use_container_width=True):
+        section['points'] = []
+        section['completed'] = False
+        # Tüm verileri temizle
+        st.rerun()
 ```
 
 **Ne yapıyor?**
 - Kullanıcı koordinatları manuel olarak da girebilir
-- Haritadan seçilen koordinatlar otomatik yansır (versiyon numarası sayesinde)
-- "Apply Coordinates" butonu ile uygula
-- "Reset Points" butonu ile sıfırla
+- İki sütun: Point A ve Point A' için ayrı ayrı
+- Haritadan seçilen koordinatlar otomatik yansır (versiyon numarası sayesinde widget yenilenir)
+- "Apply Coordinates" butonu ile manuel girilen koordinatları uygula
+- "Reset Points" butonu ile noktaları ve tüm kesit verilerini sıfırla
 
-##### Satır 318-334: Batimetri Profili
+##### Satır 312-336: Batimetri Profili
 
 ```python
+if len(section['points']) == 2:
+    st.success("Both points selected!")
+else:
+    st.warning("Select 2 points on the map or enter manually")
+
+st.markdown("---")
+
 if len(section['points']) == 2:
     st.markdown(f"### Step 2: Bathymetry Profile")
     
@@ -562,16 +653,22 @@ if len(section['points']) == 2:
     
     if section['bathy_dist']:
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=section['bathy_dist'], y=section['bathy_depth'], ...))
+        fig.add_trace(go.Scatter(x=section['bathy_dist'], y=section['bathy_depth'], mode='lines+markers', name='Bathymetry', line=dict(color='#0077B6', width=2)))
+        fig.update_layout(xaxis_title="Distance (m)", yaxis_title="Depth (m)", height=350)
         st.plotly_chart(fig)
+        
+        st.metric("Total Distance", f"{section['bathy_dist'][-1]:.1f} m")
 ```
 
 **Ne yapıyor?**
+- 2 nokta seçildiğinde yeşil başarı mesajı göster
+- 2 nokta yoksa uyarı mesajı göster
 - 2 nokta seçildiğinde otomatik olarak batimetri profili çıkarılır
 - NetCDF dosyasından derinlik verileri okunur
-- Grafik çizilir (mesafe vs derinlik)
+- Grafik çizilir (mesafe vs derinlik, mavi çizgi)
+- Toplam mesafe metrik olarak gösterilir
 
-##### Satır 338-359: Tasarım Profili
+##### Satır 338-357: Tasarım Profili
 
 ```python
 st.markdown(f"### Step 3: Design Profile")
@@ -580,27 +677,36 @@ num_pts = st.number_input("Number of points", min_value=2, max_value=20, value=5
 
 if not section['user_dist'] or len(section['user_dist']) != num_pts:
     max_dist = section['bathy_dist'][-1]
+    # Noktaları eşit aralıklarla dağıt
     section['user_dist'] = [float(i * max_dist / (num_pts - 1)) for i in range(num_pts)]
+    # Başlangıç derinliklerini batimetri profilinden interpolasyon ile al
     section['user_depth'] = [float(np.interp(d, section['bathy_dist'], section['bathy_depth'])) for d in section['user_dist']]
+
+st.markdown("**Distance (m) | Depth (m)**")
 
 for i in range(num_pts):
     c1, c2 = st.columns(2)
     with c1:
-        new_dist = st.number_input(f"D{i+1}", value=section['user_dist'][i], ...)
+        new_dist = st.number_input(f"D{i+1}", value=section['user_dist'][i], step=1.0, key=f"ud_{current}_{i}", label_visibility="collapsed")
         section['user_dist'][i] = new_dist
     with c2:
-        new_depth = st.number_input(f"H{i+1}", value=section['user_depth'][i], ...)
+        new_depth = st.number_input(f"H{i+1}", value=section['user_depth'][i], step=0.1, key=f"uh_{current}_{i}", label_visibility="collapsed")
         section['user_depth'][i] = new_depth
 ```
 
 **Ne yapıyor?**
-- Kullanıcıdan kaç noktayla profil tanımlayacağını sorar
-- Her nokta için mesafe ve derinlik girişi
-- Başlangıç değerleri batimetri profilinden alınır
+- Kullanıcıdan kaç noktayla profil tanımlayacağını sorar (2-20 arası)
+- Nokta sayısı değişirse veya henüz girilmemişse otomatik oluştur
+- Mesafeleri eşit aralıklarla dağıt (0'dan maksimum mesafeye kadar)
+- Başlangıç derinliklerini batimetri profilinden interpolasyon ile al
+- Her nokta için mesafe (D1, D2, ...) ve derinlik (H1, H2, ...) girişi
+- Kullanıcı değerleri değiştirdikçe session state'e kaydedilir
 
-##### Satır 361-390: Karşılaştırma ve Kaydetme
+##### Satır 359-388: Karşılaştırma ve Kaydetme
 
 ```python
+st.markdown("---")
+
 if st.button("Compare & Save", type="primary", key=f"compare_{current}"):
     section['completed'] = True
     st.rerun()
@@ -609,17 +715,35 @@ if section['completed']:
     st.markdown(f"### Step 4: Comparison")
     
     fig2 = go.Figure()
-    fig2.add_trace(go.Scatter(x=section['bathy_dist'], y=section['bathy_depth'], ...))
-    fig2.add_trace(go.Scatter(x=section['user_dist'], y=section['user_depth'], ...))
+    fig2.add_trace(go.Scatter(x=section['bathy_dist'], y=section['bathy_depth'], mode='lines+markers', name='Bathymetry', line=dict(color='#0077B6', width=2)))
+    fig2.add_trace(go.Scatter(x=section['user_dist'], y=section['user_depth'], mode='lines+markers', name='Design', line=dict(color='#FF6B6B', width=2, dash='dash')))
+    fig2.update_layout(xaxis_title="Distance (m)", yaxis_title="Depth (m)", height=400, legend=dict(x=0.01, y=0.99))
     st.plotly_chart(fig2)
     
     st.success(f"Section {current}-{current}' saved!")
+    
+    # Previous ve Next butonları
+    _, col_prev, col_next, _ = st.columns([1, 2, 2, 1])
+    with col_prev:
+        if current in ['B', 'C']:
+            prev_sec = 'A' if current == 'B' else 'B'
+            if st.button(f"< Previous ({prev_sec})", key=f"prev_{current}", use_container_width=True):
+                st.session_state.current_section = prev_sec
+                st.rerun()
+    with col_next:
+        if current in ['A', 'B']:
+            next_sec = 'B' if current == 'A' else 'C'
+            if st.button(f"Next ({next_sec}) >", key=f"next_{current}", use_container_width=True):
+                st.session_state.current_section = next_sec
+                st.rerun()
 ```
 
 **Ne yapıyor?**
 - "Compare & Save" butonuna basılınca kesit tamamlandı olarak işaretlenir
-- Batimetri ve tasarım profilleri üst üste çizilir
-- "Previous" ve "Next" butonları ile kesitler arası geçiş
+- Batimetri (mavi, düz çizgi) ve tasarım (kırmızı, kesikli çizgi) profilleri üst üste çizilir
+- Yeşil başarı mesajı gösterilir
+- "Previous" ve "Next" butonları ile kesitler arası geçiş (ortalanmış, tam genişlik)
+- Previous sadece B ve C'de görünür, Next sadece A ve B'de görünür
 
 ---
 
@@ -640,6 +764,7 @@ if section['completed']:
 - `st.session_state`: Verileri hafızada tutar
 - Sayfa yenilendiğinde bile veriler korunur
 - Kesitler arası geçişte veriler kaybolmaz
+- **Önemli:** Hem modül seviyesinde hem de fonksiyon içinde başlatılır (güvenlik için)
 
 ### 3. Folium Harita
 - `folium.Map()`: Harita oluştur
@@ -684,8 +809,9 @@ if section['completed']:
 - Streamlit yukarıdan aşağıya çalışır
 - Her buton tıklamasında sayfa yeniden çalışır (`st.rerun()`)
 - Session state ile veriler korunur
-- Haritada tıklama → koordinatlar otomatik forma yansır
+- Haritada tıklama → koordinatlar otomatik forma yansır (coord_version sayesinde)
 - NetCDF dosyası olmazsa uygulama hata verir
 - Modüler yapı: `app.py` ana uygulama, `profile_module.py` kesit analizi
+- `width='stretch'` kullanımı: `use_container_width=True` yerine (deprecation uyarısı önlemek için)
 
-**En önemli kural:** Her şey `st.session_state` ile hafızada tutulur!
+**En önemli kural:** Her şey `st.session_state` ile hafızada tutulur! Kesitler arası geçişte veriler kaybolmaz.

@@ -8,3 +8,5 @@ aciklamalar.md
 çalıştırmak için.txt
 .gitignore
 .devcontainer/
+*.txt
+*.csv

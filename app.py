@@ -138,7 +138,7 @@ elif st.session_state.page == 'project':
     st.markdown("---")
     
     # Section 4: Cost stuff
-    st.markdown("### 4. Cost Estimation")
+    st.markdown("### 2. Cost Estimation")
     cost1, cost2 = st.columns(2)
     with cost1:
         sand_cost = st.number_input("Sand Unit Cost ($/m³)", value=20.0, step=1.0, help="Cost per cubic meter of fill material")
