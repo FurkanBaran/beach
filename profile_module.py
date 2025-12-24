@@ -170,11 +170,11 @@ if 'coord_version' not in st.session_state:
 # Sill line coordinates (constants)
 NEW_SHORELINE_P1 = {'lat': 41.1775, 'lon': 29.6244}  # 41°10'39"N 29°37'28"E
 NEW_SHORELINE_P2 = {'lat': 41.1747, 'lon': 29.6286}  # 41°10'29"N 29°37'43"E
-PARABOL_END_P1 = {'lat': 41.1778, 'lon': 29.6253}  # 41°10'40"N 29°37'31"E
-PARABOL_END_P2 = {'lat': 41.1750, 'lon': 29.6292}  # 41°10'30"N 29°37'45"E
+SILL_P1 = {'lat': 41.1778, 'lon': 29.6253}  # 41°10'40"N 29°37'31"E
+SILL_P2 = {'lat': 41.1750, 'lon': 29.6292}  # 41°10'30"N 29°37'45"E
 
 def render_profile_section():
-    # Ensure session state is initialized
+    # Initialize session state if not already done
     if 'sections' not in st.session_state:
         st.session_state.sections = {
             'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
@@ -386,8 +386,8 @@ def render_profile_section():
         # Add sill lines to map
         new_shoreline_p1_list = [NEW_SHORELINE_P1['lat'], NEW_SHORELINE_P1['lon']]
         new_shoreline_p2_list = [NEW_SHORELINE_P2['lat'], NEW_SHORELINE_P2['lon']]
-        parabol_end_p1_list = [PARABOL_END_P1['lat'], PARABOL_END_P1['lon']]
-        parabol_end_p2_list = [PARABOL_END_P2['lat'], PARABOL_END_P2['lon']]
+        SILL_P1_list = [SILL_P1['lat'], SILL_P1['lon']]
+        SILL_P2_list = [SILL_P2['lat'], SILL_P2['lon']]
         
         folium.PolyLine(
             [new_shoreline_p1_list, new_shoreline_p2_list],
@@ -398,7 +398,7 @@ def render_profile_section():
         ).add_to(m)
         
         folium.PolyLine(
-            [parabol_end_p1_list, parabol_end_p2_list],
+            [SILL_P1_list, SILL_P2_list],
             color='green',
             weight=3,
             opacity=0.8,
@@ -418,12 +418,12 @@ def render_profile_section():
             icon=folium.Icon(color='green', icon='info-sign')
         ).add_to(m)
         folium.Marker(
-            parabol_end_p1_list,
+            SILL_P1_list,
             popup='Sill Line Start',
             icon=folium.Icon(color='green', icon='info-sign')
         ).add_to(m)
         folium.Marker(
-            parabol_end_p2_list,
+            SILL_P2_list,
             popup='Sill Line End',
             icon=folium.Icon(color='green', icon='info-sign')
         ).add_to(m)
@@ -531,7 +531,7 @@ def render_profile_section():
                     section_p1 = section['points'][0]
                     section_p2 = section['points'][1]
                     intersection_start = find_line_intersection(section_p1, section_p2, NEW_SHORELINE_P1, NEW_SHORELINE_P2)
-                    intersection_end = find_line_intersection(section_p1, section_p2, PARABOL_END_P1, PARABOL_END_P2)
+                    intersection_end = find_line_intersection(section_p1, section_p2, SILL_P1, SILL_P2)
                     
                     # Create design profile from bathymetry profile
                     bathy_dist_array = np.array(section['bathy_dist'])
