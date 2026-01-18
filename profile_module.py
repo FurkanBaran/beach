@@ -228,13 +228,13 @@ def render_profile_section():
                 st.warning(f"Volume calculation failed: {error}")
             else:
                 # Main metrics
-                col_total, col_ab, col_bc, col_extra = st.columns(4)
+                col_total, col_ab, col_bc = st.columns(3)
                 
                 with col_total:
                     st.metric(
                         "🏗️ Total Fill Volume", 
                         f"{vol_results['total']:,.0f} m³",
-                        help="Total volume including all regions and extra areas"
+                        help="Total volume including all regions (extra areas included in calculation)"
                     )
                 
                 with col_ab:
@@ -247,13 +247,6 @@ def render_profile_section():
                     st.metric(
                         "B-C Region Volume", 
                         f"{vol_results['volumes']['B-C']:,.0f} m³"
-                    )
-                
-                with col_extra:
-                    st.metric(
-                        "➕ Extra Volume", 
-                        f"{vol_results['volumes']['Extra']:,.0f} m³",
-                        help="Additional volume for areas outside drawn sections"
                     )
                 
                 # Detail table
@@ -517,13 +510,21 @@ def render_profile_section():
                             bathy_dist_trimmed.append(x)
                             bathy_depth_trimmed.append(section['bathy_depth'][i])
                     
+                    # Ensure bathymetry has a point at sill location
+                    if bathy_dist_trimmed and bathy_dist_trimmed[-1] < sill_distance:
+                        # Interpolate bathymetry depth at sill location
+                        sill_bathy_depth = np.interp(sill_distance, section['bathy_dist'], section['bathy_depth'])
+                        bathy_dist_trimmed.append(sill_distance)
+                        bathy_depth_trimmed.append(float(sill_bathy_depth))
+                    
                     section['bathy_dist'] = bathy_dist_trimmed
                     section['bathy_depth'] = bathy_depth_trimmed
                     
                     # Calculate depth for each distance point using formula (only up to sill)
+                    # Use trimmed bathymetry distances as reference
                     design_depths = []
                     design_dists = []
-                    for x in bathy_dist_array:
+                    for x in bathy_dist_trimmed:
                         if x <= sill_distance:
                             design_dists.append(x)
                             if x <= fill_distance:
@@ -537,6 +538,11 @@ def render_profile_section():
                                     design_depths.append(-abs(y))
                                 else:
                                     design_depths.append(0.0)
+                    
+                    # Ensure design profile ends exactly at sill point
+                    if len(design_dists) == 0 or abs(design_dists[-1] - sill_distance) > 0.01:
+                        design_dists.append(sill_distance)
+                        design_depths.append(sill_depth)
                     
                     section['user_dist'] = design_dists
                     section['user_depth'] = design_depths
