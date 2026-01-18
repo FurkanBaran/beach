@@ -228,13 +228,13 @@ def render_profile_section():
                 st.warning(f"Volume calculation failed: {error}")
             else:
                 # Main metrics
-                col_total, col_ab, col_bc = st.columns(3)
+                col_total, col_ab, col_bc, col_extra = st.columns(4)
                 
                 with col_total:
                     st.metric(
                         "🏗️ Total Fill Volume", 
                         f"{vol_results['total']:,.0f} m³",
-                        help="Total volume of A-B and B-C regions"
+                        help="Total volume including all regions and extra areas"
                     )
                 
                 with col_ab:
@@ -247,6 +247,13 @@ def render_profile_section():
                     st.metric(
                         "B-C Region Volume", 
                         f"{vol_results['volumes']['B-C']:,.0f} m³"
+                    )
+                
+                with col_extra:
+                    st.metric(
+                        "➕ Extra Volume", 
+                        f"{vol_results['volumes']['Extra']:,.0f} m³",
+                        help="Additional volume for areas outside drawn sections"
                     )
                 
                 # Detail table
@@ -864,7 +871,7 @@ def calculate_total_volume():
     vol_BC = (areas['B'] + areas['C']) / 2 * dist_BC
     
     # Add extra volume for areas outside the drawn sections (estimated)
-    EXTRA_VOLUME = 8.0  # m³ - accounts for fill areas not covered by sections
+    EXTRA_VOLUME = 8000.0  # m³ - accounts for fill areas not covered by sections
     total_volume = vol_AB + vol_BC + EXTRA_VOLUME
     
     return {
