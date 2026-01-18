@@ -15,8 +15,10 @@ Uygulama iki ana dosyadan oluşur:
 
 2. **`profile_module.py`** - Kesit analizi modülü
    - Harita ile nokta seçimi
-   - Batimetri verilerini NetCDF'den okuma
+   - Batimetri verilerini NetCDF'den okuma (`final_veri.nc` formatı)
+   - **Otomatik tasarım profili oluşturma** (parabol formülü ile)
    - Kesit profilleri oluşturma ve karşılaştırma
+   - Sill (eşik) konumu hesaplama ve görselleştirme
    - Grafikler ve görselleştirme
 
 ---
@@ -91,7 +93,7 @@ def reset_project():
 
 ---
 
-### Satır 21-71: LANDING PAGE (Ana Sayfa)
+### Satır 21-70: LANDING PAGE (Ana Sayfa)
 
 #### Satır 22: Sayfa Kontrolü
 
@@ -113,9 +115,9 @@ except:
 **Ne yapıyor?**
 - `try/except`: Hata yakalama. Eğer resim bulunamazsa uyarı göster.
 - `st.image()`: Resim göster
-- `width='stretch'`: Resmi tam genişlikte göster (eski `use_container_width=True` yerine)
+- `width='stretch'`: Resmi tam genişlikte göster
 
-#### Satır 30-32: Başlık ve Alt Başlık
+#### Satır 30-33: Başlık ve Alt Başlık
 
 ```python
 st.title("Beach Nourishment Design Tool")
@@ -151,7 +153,7 @@ with col_map:
 - `st.components.v1.iframe()`: Google Maps'i sayfaya göm
 - `height=410`: Haritanın yüksekliği
 
-#### Satır 45-67: Sağ Sütun - Proje Başlatma Formu
+#### Satır 45-66: Sağ Sütun - Proje Başlatma Formu
 
 ```python
 with col_form:
@@ -187,7 +189,7 @@ with col_form:
   - `st.rerun()`: Sayfayı yenile
 - `else:`: Proje adı boşsa hata göster
 
-#### Satır 69-71: Footer
+#### Satır 68-70: Footer
 
 ```python
 # Footer at the bottom
@@ -195,13 +197,13 @@ st.markdown("---")
 st.caption("© 2025 Coastal Engineering Solutions | Ağlayankaya Beach Nourishment Project")
 ```
 
-**Ne yapıyor?** Alt bilgi yazısı. (Not: Kullanıcı tercihine göre bu footer kaldırılabilir)
+**Ne yapıyor?** Alt bilgi yazısı.
 
 ---
 
-### Satır 73-158: PROJECT PAGE (Proje Sayfası)
+### Satır 72-158: PROJECT PAGE (Proje Sayfası)
 
-#### Satır 74: Sayfa Kontrolü
+#### Satır 73: Sayfa Kontrolü
 
 ```python
 elif st.session_state.page == 'project':
@@ -209,7 +211,7 @@ elif st.session_state.page == 'project':
 
 **Ne yapıyor?** "Yoksa eğer project sayfasındaysak" diye kontrol ediyor.
 
-#### Satır 76-83: Üst Çubuk
+#### Satır 75-83: Üst Çubuk
 
 ```python
 col_back, col_title = st.columns([1, 4])
@@ -271,7 +273,7 @@ st.markdown("---")
 
 **Ne yapıyor?**
 - `profile.render_profile_section()`: `profile_module.py` dosyasındaki fonksiyonu çağır
-- Bu fonksiyon harita, batimetri, kesit profilleri ve grafikleri gösterir
+- Bu fonksiyon harita, batimetri, **otomatik tasarım profili** ve grafikleri gösterir
 
 #### Satır 110-135: Bölüm 3 - Yapısal Elemanlar
 
@@ -335,7 +337,7 @@ if st.button("START CALCULATIONS", type="primary", use_container_width=True):
 
 ## 📁 profile_module.py - KESİT ANALİZİ MODÜLÜ
 
-### Satır 1-6: Kütüphaneler
+### Satır 1-7: Kütüphaneler
 
 ```python
 import streamlit as st
@@ -355,14 +357,51 @@ import numpy as np
 
 ---
 
-### Satır 9-24: Batimetri Verisi Yükleme Fonksiyonu
+### Satır 9-42: Yardımcı Fonksiyonlar
+
+#### find_line_intersection() - İki Çizginin Kesişim Noktasını Bulma
+
+```python
+def find_line_intersection(p1, p2, p3, p4):
+    """Find intersection point between two lines
+    p1-p2: First line (section line)
+    p3-p4: Second line (new shoreline or sill line)
+    """
+```
+
+**Ne yapıyor?**
+- İki çizginin kesişim noktasını hesaplar
+- `p1-p2`: Kesit çizgisi (A-A', B-B' veya C-C')
+- `p3-p4`: Yeni sahil çizgisi veya sill çizgisi
+- Determinant hesaplaması ile kesişim noktasını bulur
+- Eğer çizgiler paralelse veya kesişim noktası kesit çizgisinin dışındaysa `None` döner
+
+**Kullanım:** Tasarım profili oluştururken kesit çizgisinin yeni sahil çizgisi ve sill çizgisi ile kesişim noktalarını bulmak için kullanılır.
+
+#### calculate_distance() - İki Nokta Arası Mesafe Hesaplama
+
+```python
+def calculate_distance(point1, point2):
+    """Calculate distance between two points (Haversine formula)"""
+```
+
+**Ne yapıyor?**
+- Haversine formülü ile iki coğrafi koordinat arasındaki mesafeyi hesaplar
+- Dünya yuvarlak olduğu için basit mesafe formülü yerine bu formül kullanılır
+- Sonuç metre cinsinden döner
+
+**Kullanım:** Kesit çizgisi üzerindeki noktaların mesafelerini hesaplamak için kullanılır.
+
+---
+
+### Satır 56-71: Batimetri Verisi Yükleme Fonksiyonu
 
 ```python
 @st.cache_data
 def load_bathymetry():
     try:
         import os
-        file_name = "Mean depth in multi colour (no land).nc"
+        file_name = "final_veri.nc"
         if os.path.exists(file_name):
             file_path = os.path.abspath(file_name)
         else:
@@ -372,19 +411,23 @@ def load_bathymetry():
             return xr.open_dataset(file_path, engine='netcdf4')
         except:
             return xr.open_dataset(file_path, engine='scipy')
-    except Exception as e:
+    except:
         return None
 ```
 
 **Ne yapıyor?**
 - `@st.cache_data`: Veriyi bir kez yükle, sonra hafızada tut (her seferinde yeniden yükleme)
+- `final_veri.nc`: Projeye özel NetCDF dosyası (1D nokta verisi formatında)
 - `os.path.exists()`: Dosya var mı kontrol et
 - `xr.open_dataset()`: NetCDF dosyasını aç
 - İlk `netcdf4` motorunu dene, olmazsa `scipy` motorunu kullan
+- Hata olursa `None` döner
+
+**Önemli:** `final_veri.nc` dosyası `latitude`, `longitude` ve `label` değişkenlerini `data_vars` içinde tutar (standart NetCDF formatından farklı).
 
 ---
 
-### Satır 26-78: Derinlik Profili Çıkarma Fonksiyonu
+### Satır 73-141: Derinlik Profili Çıkarma Fonksiyonu
 
 ```python
 def extract_depth_profile(ds, point1, point2, num_points=50):
@@ -393,25 +436,30 @@ def extract_depth_profile(ds, point1, point2, num_points=50):
 **Ne yapıyor?** İki nokta arasındaki derinlik profilini çıkarır.
 
 **İçinde:**
-1. **Satır 30-31:** İki nokta arasında düz çizgi çiz (lat/lon interpolasyonu)
-2. **Satır 33-41:** Haversine formülü ile mesafeleri hesapla (dünya yuvarlak olduğu için)
-3. **Satır 43-50:** NetCDF'deki derinlik değişkenini bul
-4. **Satır 56-62:** Her noktadaki derinliği NetCDF'den oku
-5. **Satır 66-71:** Eksik veriler varsa interpolasyon yap
-6. **Satır 73-74:** Derinlik pozitifse negatif yap (deniz seviyesinin altında)
+1. **Satır 77-78:** İki nokta arasında düz çizgi çiz (lat/lon interpolasyonu)
+2. **Satır 80-88:** Haversine formülü ile mesafeleri hesapla (dünya yuvarlak olduğu için)
+3. **Satır 90-96:** NetCDF'deki koordinatları bul (`data_vars` içinde `latitude` ve `longitude`)
+4. **Satır 98-110:** Derinlik değişkenini bul (`label`, `depth` veya `elevation` içeren değişken)
+5. **Satır 115-122:** Her noktadaki derinliği **en yakın komşu (nearest neighbor)** yöntemi ile bul
+   - Euclidean mesafe ile en yakın noktayı bul
+   - O noktanın derinlik değerini al
+6. **Satır 126-132:** Eksik veriler varsa interpolasyon yap
+7. **Satır 134-136:** Derinlik pozitifse negatif yap (deniz seviyesinin altında)
 
 **Döndürür:** Mesafe listesi ve derinlik listesi
 
+**Önemli:** `final_veri.nc` formatı 1D nokta verisi olduğu için grid interpolasyonu yerine nearest neighbor kullanılır.
+
 ---
 
-### Satır 80-92: Session State Başlatma (Modül Seviyesi)
+### Satır 143-155: Session State Başlatma (Modül Seviyesi)
 
 ```python
 if 'sections' not in st.session_state:
     st.session_state.sections = {
-        'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
-        'B': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
-        'C': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False}
+        'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False, 'sill_distance': None, 'sill_depth': None},
+        'B': {...},
+        'C': {...}
     }
 
 if 'current_section' not in st.session_state:
@@ -426,47 +474,48 @@ if 'coord_version' not in st.session_state:
 - `sections`: Her kesit için verileri saklar
   - `points`: Haritada seçilen 2 nokta (lat/lon)
   - `bathy_dist`, `bathy_depth`: NetCDF'den okunan gerçek derinlik profili
-  - `user_dist`, `user_depth`: Kullanıcının girdiği tasarım profili
+  - `user_dist`, `user_depth`: **Otomatik oluşturulan** tasarım profili
   - `completed`: Bu kesit tamamlandı mı?
+  - `sill_distance`, `sill_depth`: Sill (eşik) konumu ve derinliği
 - `current_section`: Şu anda hangi kesitte çalışıyoruz (A, B, C veya ALL)
 - `coord_version`: Koordinat widget'larını yenilemek için versiyon numarası
 
-**Not:** `render_profile_section()` fonksiyonunun içinde de aynı kontroller yapılır (güvenlik için çift kontrol)
+---
+
+### Satır 157-161: Sill Çizgisi Koordinatları (Sabitler)
+
+```python
+NEW_SHORELINE_P1 = {'lat': 41.1775, 'lon': 29.6244}  # 41°10'39"N 29°37'28"E
+NEW_SHORELINE_P2 = {'lat': 41.1747, 'lon': 29.6286}  # 41°10'29"N 29°37'43"E
+SILL_P1 = {'lat': 41.1778, 'lon': 29.6253}  # 41°10'40"N 29°37'31"E
+SILL_P2 = {'lat': 41.1750, 'lon': 29.6292}  # 41°10'30"N 29°37'45"E
+```
+
+**Ne yapıyor?**
+- Yeni sahil çizgisi (doldurma başlangıcı) ve sill çizgisi (parabol sonu) koordinatlarını tanımlar
+- Bu çizgiler tasarım profili oluştururken kullanılır
+- Haritada yeşil çizgiler olarak gösterilir
 
 ---
 
-### Satır 94-377: render_profile_section() Fonksiyonu
+### Satır 163-588: render_profile_section() Fonksiyonu
 
 Bu fonksiyon kesit analizi arayüzünü oluşturur.
 
-#### Satır 94-111: Başlangıç ve Session State Kontrolü
+#### Satır 163-168: Başlangıç
 
 ```python
 def render_profile_section():
-    # Ensure session state is initialized
-    if 'current_section' not in st.session_state:
-        st.session_state.current_section = 'A'
-    if 'sections' not in st.session_state:
-        st.session_state.sections = {
-            'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
-            'B': {...},
-            'C': {...}
-        }
-    if 'coord_version' not in st.session_state:
-        st.session_state.coord_version = 0
-    
     bathymetry_ds = load_bathymetry()
     st.markdown("---")
     current = st.session_state.current_section
 ```
 
 **Ne yapıyor?**
-- Fonksiyonun başında session state'in başlatıldığından emin olur (güvenlik kontrolü)
-- Eğer session state yoksa başlatır
-- Batimetri verisini yükler ve mevcut kesiti alır
-- **Neden önemli?** Bazı durumlarda (örneğin uygulama ilk açıldığında) session state henüz başlatılmamış olabilir. Bu kontrol hataları önler.
+- Batimetri verisini yükler
+- Mevcut kesiti alır
 
-#### Satır 113-138: Navigasyon Butonları
+#### Satır 170-195: Navigasyon Butonları
 
 ```python
 st.markdown("### Section Navigation")
@@ -484,8 +533,9 @@ with col_a:
 - Tamamlanan kesitlerin yanında "[Done]" yazıyor
 - Aktif kesit mavi (primary), diğerleri gri (secondary)
 - Butona basınca ilgili kesit açılıyor ve sayfa yenilenir
+- "All Results" butonunda tamamlanan kesit sayısı gösterilir (örn: "All Results (2/3)")
 
-#### Satır 140-219: ALL RESULTS VIEW
+#### Satır 197-330: ALL RESULTS VIEW
 
 ```python
 if current == 'ALL':
@@ -497,39 +547,84 @@ if current == 'ALL':
     if not completed_sections:
         st.warning("No sections completed yet. Please complete at least one section to view results.")
     else:
-        st.markdown("## All Cross-Section Profiles")
+        # ===== VOLUME CALCULATION SUMMARY =====
+        st.markdown("## 📊 Volume Calculation Summary")
+        
+        vol_results, error = calculate_total_volume()
+        
+        if error:
+            st.warning(f"Volume calculation failed: {error}")
+        else:
+            # Main metrics
+            col_total, col_ab, col_bc = st.columns(3)
+            
+            with col_total:
+                st.metric("🏗️ Total Fill Volume", f"{vol_results['total']:,.0f} m³")
+            with col_ab:
+                st.metric("A-B Region Volume", f"{vol_results['volumes']['A-B']:,.0f} m³")
+            with col_bc:
+                st.metric("B-C Region Volume", f"{vol_results['volumes']['B-C']:,.0f} m³")
+            
+            # Section details
+            st.markdown("#### Section Details")
+            detail_cols = st.columns(3)
+            for i, sec_name in enumerate(['A', 'B', 'C']):
+                with detail_cols[i]:
+                    st.markdown(f"**Section {sec_name}-{sec_name}'**")
+                    st.write(f"Fill Area: **{vol_results['areas'][sec_name]:,.1f} m²**")
+            
+            # Inter-section distances
+            st.markdown("#### Inter-Section Distances")
+            dist_col1, dist_col2 = st.columns(2)
+            with dist_col1:
+                st.write(f"A ↔ B Distance: **{vol_results['distances']['A-B']:,.1f} m**")
+            with dist_col2:
+                st.write(f"B ↔ C Distance: **{vol_results['distances']['B-C']:,.1f} m**")
+            
+            # Calculation method explanation
+            with st.expander("📐 Calculation Method"):
+                st.markdown("""
+                **Average End Area Method**
+                
+                ```
+                V = (A₁ + A₂) / 2 × L
+                ```
+                
+                - **A₁, A₂**: Fill areas of two sections (m²)
+                - **L**: Distance between sections (m)
+                - **V**: Volume (m³)
+                """)
+        
+        st.markdown("---")
+        
+        st.markdown("## Combined View - All Sections")
+        
+        fig_combined = go.Figure()
+        colors = {'A': '#2563EB', 'B': '#DC2626', 'C': '#FACC15'}
+        sill_colors = {'A': '#006400', 'B': '#00FF00', 'C': '#90EE90'}
         
         for sec_name in ['A', 'B', 'C']:
             sec_data = st.session_state.sections[sec_name]
             if sec_data['completed']:
-                st.markdown(f"### Section {sec_name}-{sec_name}'")
-                
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(x=sec_data['bathy_dist'], y=sec_data['bathy_depth'], ...))
-                fig.add_trace(go.Scatter(x=sec_data['user_dist'], y=sec_data['user_depth'], ...))
-                st.plotly_chart(fig)
-                
-                # Metrikler gösterilir
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Total Distance", f"{sec_data['bathy_dist'][-1]:.1f} m")
-                col2.metric("Max Depth (Bathy)", f"{abs(min(sec_data['bathy_depth'])):.2f} m")
-                col3.metric("Max Depth (Design)", f"{abs(min(sec_data['user_depth'])):.2f} m")
-        
-        st.markdown("## Combined View - All Sections")
-        fig_combined = go.Figure()
-        colors = {'A': '#2563EB', 'B': '#DC2626', 'C': '#FACC15'}
-        # Tüm kesitler tek grafikte
+                # Add bathymetry and design traces
+                # Add sill markers with different green shades
 ```
 
 **Ne yapıyor?**
-- Tamamlanan tüm kesitlerin grafiklerini tek sayfada gösterir
-- Her kesit için ayrı grafik: batimetri (mavi) vs tasarım (kırmızı, kesikli)
-- Her kesit için metrikler: toplam mesafe, maksimum derinlikler
-- En altta Combined View: Tüm kesitler tek grafikte (A: mavi, B: kırmızı, C: sarı)
+- **Volume Calculation Summary:** Tüm kesitler tamamlandığında otomatik olarak hacim hesaplaması yapılır
+  - **Total Fill Volume:** A-B ve B-C bölgelerinin toplam hacmi
+  - **A-B Region Volume:** A ve B kesitleri arasındaki hacim
+  - **B-C Region Volume:** B ve C kesitleri arasındaki hacim
+  - **Section Details:** Her kesit için dolgu alanı (m²)
+  - **Inter-Section Distances:** Kesitler arası mesafeler
+  - **Calculation Method:** Average End Area Method açıklaması (genişletilebilir bölüm)
+- **Combined View:** Tüm kesitler tek grafikte
+  - A: Mavi, B: Kırmızı, C: Sarı
+  - Her kesit için sill marker'ları farklı yeşil tonlarda (A: koyu yeşil, B: normal yeşil, C: açık yeşil)
 
-#### Satır 221-388: SECTION EDITING VIEW
+#### Satır 340-588: SECTION EDITING VIEW
 
-##### Satır 228-255: Harita ve Nokta Seçimi
+##### Satır 347-377: Harita ve Sill Çizgileri
 
 ```python
 m = folium.Map(location=[41.175354, 29.626743], zoom_start=15)
@@ -540,26 +635,37 @@ folium.TileLayer(
     overlay=False,
     control=True
 ).add_to(m)
-map_colors = {'A': 'blue', 'B': 'green', 'C': 'orange'}
 
-# Tüm kesitlerin noktalarını göster
-for sec_name, sec_data in st.session_state.sections.items():
-    if sec_data['points']:
-        color = map_colors.get(sec_name, 'gray')
-        for idx, pt in enumerate(sec_data['points']):
-            folium.Marker([pt['lat'], pt['lon']], ...).add_to(m)
-        if len(sec_data['points']) == 2:
-            folium.PolyLine([...], color=color if sec_name == current else 'gray', ...).add_to(m)
+# Add sill lines to map
+new_shoreline_coords = [[NEW_SHORELINE_P1['lat'], NEW_SHORELINE_P1['lon']], 
+                        [NEW_SHORELINE_P2['lat'], NEW_SHORELINE_P2['lon']]]
+sill_coords = [[SILL_P1['lat'], SILL_P1['lon']], 
+               [SILL_P2['lat'], SILL_P2['lon']]]
+
+folium.PolyLine(new_shoreline_coords, color='green', weight=3, opacity=0.8,
+               popup='New Shoreline (Fill Start)').add_to(m)
+folium.PolyLine(sill_coords, color='green', weight=3, opacity=0.8,
+               dashArray='10, 5', popup='Parabola End (Sill Location)').add_to(m)
+
+# Add markers to line start and end points
+for coord, popup_text in [(new_shoreline_coords[0], 'New Shoreline Start'),
+                          (new_shoreline_coords[1], 'New Shoreline End'),
+                          (sill_coords[0], 'Sill Line Start'),
+                          (sill_coords[1], 'Sill Line End')]:
+    folium.Marker(coord, popup=popup_text,
+                 icon=folium.Icon(color='green', icon='info-sign')).add_to(m)
 ```
 
 **Ne yapıyor?**
 - Folium haritası oluştur (Şile Ağlayankaya koordinatları)
 - Esri uydu görüntüsü katmanı ekle (satellite view)
+- **Yeni sahil çizgisi:** Yeşil düz çizgi (doldurma başlangıcı)
+- **Sill çizgisi:** Yeşil kesikli çizgi (parabol sonu)
+- Her çizginin başlangıç ve bitiş noktalarına yeşil marker ekle
 - Tüm kesitlerin seçilen noktalarını göster (aktif kesit renkli, diğerleri gri)
 - Aktif kesit için çizgi kalın, diğerleri ince
-- Kullanıcı haritaya tıklayarak 2 nokta seçebilir
 
-##### Satır 257-274: Harita Tıklamalarını İşleme
+##### Satır 395-412: Harita Tıklamalarını İşleme
 
 ```python
 m.add_child(folium.LatLngPopup())
@@ -591,7 +697,7 @@ if map_data and map_data.get('last_clicked'):
 - Koordinat versiyonunu artır (manuel koordinat formunu yenilemek için)
 - Sayfayı yenile
 
-##### Satır 276-310: Manuel Koordinat Formu
+##### Satır 414-448: Manuel Koordinat Formu
 
 ```python
 st.markdown("#### Manual Coordinates")
@@ -610,7 +716,7 @@ with col1:
 with col2:
     st.markdown(f"**Point {current}'**")
     lat2 = st.number_input("Latitude ", value=default_lat2, format="%.6f", key=f"lat2_{current}_{v}")
-    lon2 = st.number_input("Longitude ", value=default_lon2, format="%.6f", key=f"lon2_{current}_{v}")
+    lon2 = st.number_input("Longitude ", value=default_lat2, format="%.6f", key=f"lon2_{current}_{v}")
 
 col_apply, col_reset = st.columns(2)
 with col_apply:
@@ -621,7 +727,11 @@ with col_reset:
     if st.button("Reset Points", key=f"reset_{current}", use_container_width=True):
         section['points'] = []
         section['completed'] = False
-        # Tüm verileri temizle
+        section['bathy_dist'] = []
+        section['bathy_depth'] = []
+        section['user_dist'] = []
+        section['user_depth'] = []
+        st.session_state.coord_version += 1
         st.rerun()
 ```
 
@@ -632,16 +742,9 @@ with col_reset:
 - "Apply Coordinates" butonu ile manuel girilen koordinatları uygula
 - "Reset Points" butonu ile noktaları ve tüm kesit verilerini sıfırla
 
-##### Satır 312-336: Batimetri Profili
+##### Satır 450-520: Batimetri Profili ve Otomatik Tasarım Profili
 
 ```python
-if len(section['points']) == 2:
-    st.success("Both points selected!")
-else:
-    st.warning("Select 2 points on the map or enter manually")
-
-st.markdown("---")
-
 if len(section['points']) == 2:
     st.markdown(f"### Step 2: Bathymetry Profile")
     
@@ -658,67 +761,117 @@ if len(section['points']) == 2:
         st.plotly_chart(fig)
         
         st.metric("Total Distance", f"{section['bathy_dist'][-1]:.1f} m")
+        
+        # Create automatic design profile
+        # Parabola: y = 0.11 * x^0.67
+        if not section['user_dist']:
+            # Find intersection points with section line
+            section_p1 = section['points'][0]
+            section_p2 = section['points'][1]
+            intersection_start = find_line_intersection(section_p1, section_p2, NEW_SHORELINE_P1, NEW_SHORELINE_P2)
+            intersection_end = find_line_intersection(section_p1, section_p2, SILL_P1, SILL_P2)
+            
+            # Calculate distances to intersection points
+            fill_distance = calculate_distance(section_p1, intersection_start) if intersection_start else 0.0
+            parabol_end_distance = calculate_distance(section_p1, intersection_end) if intersection_end else float('inf')
+            
+            # Calculate sill depth once (used for constant depth after sill point)
+            sill_depth = 0.0
+            if parabol_end_distance < float('inf'):
+                relative_x_end = parabol_end_distance - fill_distance
+                if relative_x_end > 0:
+                    sill_depth = -abs(0.11 * (relative_x_end ** 0.67))
+                section['sill_distance'] = parabol_end_distance
+                section['sill_depth'] = sill_depth
+            else:
+                section['sill_distance'] = None
+                section['sill_depth'] = None
+            
+            # Calculate depth for each distance point using formula
+            design_depths = []
+            for x in bathy_dist_array:
+                if x <= fill_distance:
+                    # 0 meters up to first intersection point (filled area)
+                    design_depths.append(0.0)
+                elif x <= parabol_end_distance:
+                    # Between first and second intersection points: Parabola
+                    # y = 0.11 * (x - fill_distance)^0.67
+                    relative_x = x - fill_distance
+                    if relative_x > 0:
+                        y = 0.11 * (relative_x ** 0.67)
+                        design_depths.append(-abs(y))
+                    else:
+                        design_depths.append(0.0)
+                else:
+                    # After sill point: constant depth
+                    design_depths.append(sill_depth)
+            
+            section['user_dist'] = bathy_dist_array.tolist()
+            section['user_depth'] = design_depths
+            section['completed'] = True
 ```
 
 **Ne yapıyor?**
-- 2 nokta seçildiğinde yeşil başarı mesajı göster
-- 2 nokta yoksa uyarı mesajı göster
 - 2 nokta seçildiğinde otomatik olarak batimetri profili çıkarılır
 - NetCDF dosyasından derinlik verileri okunur
 - Grafik çizilir (mesafe vs derinlik, mavi çizgi)
 - Toplam mesafe metrik olarak gösterilir
+- **Otomatik tasarım profili oluşturulur:**
+  1. Kesit çizgisinin yeni sahil çizgisi ile kesişim noktası bulunur (`fill_distance`)
+  2. Kesit çizgisinin sill çizgisi ile kesişim noktası bulunur (`parabol_end_distance`)
+  3. Sill derinliği hesaplanır (parabol formülü ile)
+  4. Her mesafe noktası için:
+     - `x <= fill_distance`: 0 metre (doldurulmuş alan)
+     - `fill_distance < x <= parabol_end_distance`: Parabol formülü `y = 0.11 * (x - fill_distance)^0.67`
+     - `x > parabol_end_distance`: Sill derinliğinde sabit (parabol sonu)
+  5. Tasarım profili otomatik olarak kaydedilir ve kesit tamamlandı olarak işaretlenir
 
-##### Satır 338-357: Tasarım Profili
+**Önemli:** Kullanıcıdan tasarım profili alınmaz, otomatik olarak parabol formülü ile oluşturulur.
 
-```python
-st.markdown(f"### Step 3: Design Profile")
-
-num_pts = st.number_input("Number of points", min_value=2, max_value=20, value=5, key=f"npts_{current}")
-
-if not section['user_dist'] or len(section['user_dist']) != num_pts:
-    max_dist = section['bathy_dist'][-1]
-    # Noktaları eşit aralıklarla dağıt
-    section['user_dist'] = [float(i * max_dist / (num_pts - 1)) for i in range(num_pts)]
-    # Başlangıç derinliklerini batimetri profilinden interpolasyon ile al
-    section['user_depth'] = [float(np.interp(d, section['bathy_dist'], section['bathy_depth'])) for d in section['user_dist']]
-
-st.markdown("**Distance (m) | Depth (m)**")
-
-for i in range(num_pts):
-    c1, c2 = st.columns(2)
-    with c1:
-        new_dist = st.number_input(f"D{i+1}", value=section['user_dist'][i], step=1.0, key=f"ud_{current}_{i}", label_visibility="collapsed")
-        section['user_dist'][i] = new_dist
-    with c2:
-        new_depth = st.number_input(f"H{i+1}", value=section['user_depth'][i], step=0.1, key=f"uh_{current}_{i}", label_visibility="collapsed")
-        section['user_depth'][i] = new_depth
-```
-
-**Ne yapıyor?**
-- Kullanıcıdan kaç noktayla profil tanımlayacağını sorar (2-20 arası)
-- Nokta sayısı değişirse veya henüz girilmemişse otomatik oluştur
-- Mesafeleri eşit aralıklarla dağıt (0'dan maksimum mesafeye kadar)
-- Başlangıç derinliklerini batimetri profilinden interpolasyon ile al
-- Her nokta için mesafe (D1, D2, ...) ve derinlik (H1, H2, ...) girişi
-- Kullanıcı değerleri değiştirdikçe session state'e kaydedilir
-
-##### Satır 359-388: Karşılaştırma ve Kaydetme
+##### Satır 522-588: Karşılaştırma ve Navigasyon
 
 ```python
-st.markdown("---")
-
-if st.button("Compare & Save", type="primary", key=f"compare_{current}"):
-    section['completed'] = True
-    st.rerun()
-
 if section['completed']:
-    st.markdown(f"### Step 4: Comparison")
+    st.markdown(f"### Step 3: Comparison")
     
     fig2 = go.Figure()
     fig2.add_trace(go.Scatter(x=section['bathy_dist'], y=section['bathy_depth'], mode='lines+markers', name='Bathymetry', line=dict(color='#0077B6', width=2)))
     fig2.add_trace(go.Scatter(x=section['user_dist'], y=section['user_depth'], mode='lines+markers', name='Design', line=dict(color='#FF6B6B', width=2, dash='dash')))
+    
+    # Mark sill location (parabola end point)
+    if section.get('sill_distance') is not None and section.get('sill_depth') is not None:
+        # Sill marker (green diamond)
+        fig2.add_trace(go.Scatter(
+            x=[section['sill_distance']], 
+            y=[section['sill_depth']], 
+            mode='markers',
+            name='Sill Location',
+            marker=dict(
+                symbol='diamond',
+                size=15,
+                color='#00FF00',
+                line=dict(color='#006600', width=2)
+            ),
+            hovertemplate='Sill Location<br>Distance: %{x:.1f} m<br>Depth: %{y:.2f} m<extra></extra>'
+        ))
+        
+        # Vertical line downward from sill (green)
+        min_depth = min(min(section['bathy_depth']), min(section['user_depth']))
+        fig2.add_shape(
+            type="line",
+            x0=section['sill_distance'],
+            y0=section['sill_depth'],
+            x1=section['sill_distance'],
+            y1=min_depth - 1,
+            line=dict(color='#00FF00', width=2, dash='dash')
+        )
+    
     fig2.update_layout(xaxis_title="Distance (m)", yaxis_title="Depth (m)", height=400, legend=dict(x=0.01, y=0.99))
     st.plotly_chart(fig2)
+    
+    # Show sill information
+    if section.get('sill_distance') is not None and section.get('sill_depth') is not None:
+        st.info(f"**Sill Location:** Distance = {section['sill_distance']:.1f} m, Depth = {abs(section['sill_depth']):.2f} m")
     
     st.success(f"Section {current}-{current}' saved!")
     
@@ -731,19 +884,106 @@ if section['completed']:
                 st.session_state.current_section = prev_sec
                 st.rerun()
     with col_next:
-        if current in ['A', 'B']:
-            next_sec = 'B' if current == 'A' else 'C'
-            if st.button(f"Next ({next_sec}) >", key=f"next_{current}", use_container_width=True):
-                st.session_state.current_section = next_sec
+        if current == 'A':
+            if st.button("Next (B) >", key=f"next_{current}", use_container_width=True):
+                st.session_state.current_section = 'B'
+                st.rerun()
+        elif current == 'B':
+            if st.button("Next (C) >", key=f"next_{current}", use_container_width=True):
+                st.session_state.current_section = 'C'
+                st.rerun()
+        elif current == 'C':
+            if st.button("All Results >", key=f"next_{current}", use_container_width=True):
+                st.session_state.current_section = 'ALL'
                 st.rerun()
 ```
 
 **Ne yapıyor?**
-- "Compare & Save" butonuna basılınca kesit tamamlandı olarak işaretlenir
 - Batimetri (mavi, düz çizgi) ve tasarım (kırmızı, kesikli çizgi) profilleri üst üste çizilir
+- **Sill konumu:** Yeşil elmas marker ve dikey kesikli çizgi ile gösterilir
+- Sill bilgisi (mesafe ve derinlik) bilgi kutusunda gösterilir
 - Yeşil başarı mesajı gösterilir
-- "Previous" ve "Next" butonları ile kesitler arası geçiş (ortalanmış, tam genişlik)
-- Previous sadece B ve C'de görünür, Next sadece A ve B'de görünür
+- "Previous" ve "Next" butonları ile kesitler arası geçiş
+  - Previous sadece B ve C'de görünür
+  - Next: A'da "Next (B)", B'de "Next (C)", C'de "All Results"
+
+---
+
+### Satır 586-694: VOLUME CALCULATION FUNCTIONS
+
+#### calculate_fill_area() - Fill Area Calculation
+
+```python
+def calculate_fill_area(bathy_dist, bathy_depth, design_dist, design_depth, sill_distance=None):
+    """
+    Calculate fill area between bathymetry and design profiles.
+    If sill_distance is provided, calculates only up to that distance
+    """
+```
+
+**Ne yapıyor?**
+- Bathymetry ve design profilleri arasındaki dolgu alanını hesaplar
+- **Sill distance:** Verilirse sadece sill noktasına kadar olan kısmı hesaplar
+- **Yöntem:**
+  1. Design profili bathymetry profili mesafe noktalarına interpolasyon ile uyarlar
+  2. Dolgu yüksekliğini hesaplar: `fill_height = design_depth - bathy_depth`
+  3. Negatif değerleri sıfırlar (sadece dolgu alanı)
+  4. Trapezoid yöntemi ile alanı hesaplar
+- **Döndürür:** Dolgu alanı (m²)
+
+#### calculate_section_midpoint() - Section Midpoint
+
+```python
+def calculate_section_midpoint(points):
+    """
+    Calculate the midpoint of a section line.
+    """
+```
+
+**Ne yapıyor?**
+- Kesit çizgisinin orta noktasını hesaplar
+- İki noktanın lat/lon ortalamasını alır
+- Kesitler arası mesafe hesaplamak için kullanılır
+
+#### calculate_total_volume() - Total Volume Calculation
+
+```python
+def calculate_total_volume():
+    """
+    Calculate total fill volume between all sections.
+    Uses Average End Area Method: V = (A1 + A2) / 2 * L
+    """
+```
+
+**Ne yapıyor?**
+- Tüm kesitler arasındaki toplam dolgu hacmini hesaplar
+- **Average End Area Method:** `V = (A₁ + A₂) / 2 × L`
+  - **A₁, A₂:** İki kesitin dolgu alanları (m²)
+  - **L:** Kesitler arası mesafe (m)
+  - **V:** Hacim (m³)
+- **Adımlar:**
+  1. Tüm kesitlerin tamamlanıp tamamlanmadığını kontrol eder
+  2. Her kesit için dolgu alanını hesaplar (sill'e kadar)
+  3. Kesit orta noktalarını hesaplar
+  4. Kesitler arası mesafeleri hesaplar (Haversine formülü)
+  5. A-B ve B-C bölgeleri için hacimleri hesaplar
+  6. Toplam hacmi döndürür
+- **Döndürür:** `(results_dict, error_message)`
+  - `results_dict`: `areas`, `distances`, `volumes`, `total` içerir
+  - `error_message`: Hata varsa mesaj, yoksa `None`
+
+#### get_volume_results() - Get Volume Results
+
+```python
+def get_volume_results():
+    """
+    Get volume calculation results (called from app.py).
+    """
+```
+
+**Ne yapıyor?**
+- `app.py`'dan çağrılmak için wrapper fonksiyon
+- `calculate_total_volume()` fonksiyonunu çağırır ve sonuçları döndürür
 
 ---
 
@@ -764,7 +1004,7 @@ if section['completed']:
 - `st.session_state`: Verileri hafızada tutar
 - Sayfa yenilendiğinde bile veriler korunur
 - Kesitler arası geçişte veriler kaybolmaz
-- **Önemli:** Hem modül seviyesinde hem de fonksiyon içinde başlatılır (güvenlik için)
+- **Önemli:** Modül seviyesinde başlatılır
 
 ### 3. Folium Harita
 - `folium.Map()`: Harita oluştur
@@ -776,14 +1016,32 @@ if section['completed']:
 ### 4. NetCDF ve xarray
 - `.nc` dosyaları: Bilimsel veri formatı
 - `xr.open_dataset()`: Dosyayı aç
-- `.sel()`: Belirli koordinatları seç
+- `final_veri.nc`: 1D nokta verisi formatı (`latitude`, `longitude`, `label` `data_vars` içinde)
 - `.values`: Numpy dizisine çevir
+- **Nearest neighbor:** Grid interpolasyonu yerine en yakın nokta yöntemi kullanılır
 
 ### 5. Plotly Grafikleri
 - `go.Figure()`: Boş grafik oluştur
 - `go.Scatter()`: Çizgi/nokta grafiği ekle
 - `.add_trace()`: Yeni çizgi ekle
+- `.add_shape()`: Şekil ekle (dikey çizgi için)
 - `.update_layout()`: Eksen isimleri, boyut ayarla
+
+### 6. Otomatik Tasarım Profili
+- **Parabol formülü:** `y = 0.11 * x^0.67`
+- **Yeni sahil çizgisi:** Doldurma başlangıcı (0 metre derinlik)
+- **Sill çizgisi:** Parabol sonu (sabit derinlik)
+- **Üç bölge:**
+  1. Doldurulmuş alan (0 metre)
+  2. Parabol bölgesi (hızlı azalıp sonra yavaş azalan eğri)
+  3. Sill sonrası (sabit derinlik)
+
+### 7. Hacim Hesaplama
+- **Average End Area Method:** `V = (A₁ + A₂) / 2 × L`
+- **Dolgu alanı:** Bathymetry ve design profilleri arasındaki fark
+- **Sill limiti:** Hesaplama sadece sill noktasına kadar yapılır
+- **Kesitler arası mesafe:** Haversine formülü ile hesaplanır
+- **Sonuçlar:** Toplam hacim, bölge hacimleri, dolgu alanları, mesafeler
 
 ---
 
@@ -794,13 +1052,27 @@ if section['completed']:
 3. **Dalga ve sediman verileri gir** → Hs, T, d50, A, h_toe
 4. **Section Navigation** → A, B, C veya All Results seç
 5. **Haritada 2 nokta seç** → Kesit çizgisi belirlenir
-6. **Batimetri profili çıkarılır** → NetCDF'den otomatik
-7. **Tasarım profili gir** → Manuel değerler
-8. **"Compare & Save"** → Grafikler karşılaştırılır, kesit kaydedilir
-9. **"Next"** → Sonraki kesite geç
-10. **Yapısal elemanlar ve maliyet gir** → Groin, Sill, maliyetler
-11. **"START CALCULATIONS"** → Sonuçlar gösterilir (şu an dummy data)
-12. **"← Home"** → Ana sayfaya geri dön
+   - Haritada **yeşil çizgiler** görünür (yeni sahil ve sill çizgileri)
+6. **Batimetri profili çıkarılır** → NetCDF'den otomatik (nearest neighbor yöntemi)
+7. **Tasarım profili otomatik oluşturulur** → Parabol formülü ile
+   - Yeni sahil çizgisi ile kesişim noktası bulunur
+   - Sill çizgisi ile kesişim noktası bulunur
+   - Parabol formülü ile derinlikler hesaplanır
+8. **Karşılaştırma grafiği** → Batimetri vs Tasarım
+   - **Sill konumu:** Yeşil elmas marker ve dikey çizgi
+9. **"Next"** → Sonraki kesite geç (C'de "All Results")
+10. **All Results** → Tüm kesitler tek sayfada
+    - **Volume Calculation Summary:** Otomatik hacim hesaplaması
+      - Toplam dolgu hacmi
+      - A-B ve B-C bölge hacimleri
+      - Her kesit için dolgu alanı
+      - Kesitler arası mesafeler
+      - Hesaplama yöntemi açıklaması
+    - Combined view (tüm kesitler tek grafikte)
+    - Sill marker'ları farklı yeşil tonlarda
+11. **Yapısal elemanlar ve maliyet gir** → Groin, Sill, maliyetler
+12. **"START CALCULATIONS"** → Sonuçlar gösterilir (şu an dummy data)
+13. **"← Home"** → Ana sayfaya geri dön
 
 ---
 
@@ -810,8 +1082,36 @@ if section['completed']:
 - Her buton tıklamasında sayfa yeniden çalışır (`st.rerun()`)
 - Session state ile veriler korunur
 - Haritada tıklama → koordinatlar otomatik forma yansır (coord_version sayesinde)
-- NetCDF dosyası olmazsa uygulama hata verir
+- `final_veri.nc` dosyası olmazsa uygulama hata verir
 - Modüler yapı: `app.py` ana uygulama, `profile_module.py` kesit analizi
-- `width='stretch'` kullanımı: `use_container_width=True` yerine (deprecation uyarısı önlemek için)
+- **Tasarım profili kullanıcıdan alınmaz, otomatik oluşturulur**
+- Sill konumu her kesit için otomatik hesaplanır ve görselleştirilir
+- Combined view'da sill marker'ları section'a göre farklı renklerde (A: koyu yeşil, B: normal yeşil, C: açık yeşil)
 
 **En önemli kural:** Her şey `st.session_state` ile hafızada tutulur! Kesitler arası geçişte veriler kaybolmaz.
+
+---
+
+## 📝 ÖNEMLİ NOTLAR
+
+### final_veri.nc Dosya Formatı
+- **Format:** 1D nokta verisi (grid değil)
+- **Koordinatlar:** `latitude` ve `longitude` `data_vars` içinde (standart NetCDF'den farklı)
+- **Derinlik:** `label` değişkeni (veya `depth`/`elevation` içeren değişken)
+- **Okuma yöntemi:** Nearest neighbor (en yakın nokta)
+
+### Otomatik Tasarım Profili
+- **Formül:** `y = 0.11 * x^0.67` (x: mesafe, y: derinlik)
+- **Eğri şekli:** Hızlı azalıp sonra yavaş azalan
+- **Üç bölge:**
+  1. Doldurulmuş alan: 0 metre (yeni sahil çizgisine kadar)
+  2. Parabol bölgesi: Formül ile hesaplanan derinlikler (sill çizgisine kadar)
+  3. Sill sonrası: Sill derinliğinde sabit
+
+### Sill (Eşik) Konumu
+- **Tanım:** Parabol formülünün bittiği nokta
+- **Hesaplama:** Sill çizgisi ile kesit çizgisinin kesişim noktası
+- **Görselleştirme:**
+  - Grafiklerde: Yeşil elmas marker + dikey kesikli çizgi
+  - Haritada: Yeşil kesikli çizgi
+  - Combined view'da: Section'a göre farklı yeşil tonlar

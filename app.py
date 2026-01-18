@@ -1,3 +1,6 @@
+# app.py
+# Main application file for Beach Nourishment Design Tool
+
 import streamlit as st
 import profile_module as profile
 
@@ -44,7 +47,6 @@ if st.session_state.page == 'landing':
     
     with col_form:
         st.markdown("### Start New Project")
-        st.markdown("")
         
         # Create a form for the user to enter their project name
         with st.form("entry_form"):
@@ -85,9 +87,9 @@ elif st.session_state.page == 'project':
     st.divider()
     st.info("Please enter the required parameters for design calculations.")
     
-    #  Getting all the data from the user 
+    # Collect all required data from the user
     
-    # Section 1: Wave and sediment stuff
+    # Section 1: Wave and sediment properties
     st.markdown("### 1. Wave and Sediment Properties")
     
     # Split into two columns so it looks cleaner
@@ -103,12 +105,12 @@ elif st.session_state.page == 'project':
     
     st.markdown("---")
     
-    # Section 2: The three cross-sections we need
+    # Section 2: Cross-section analysis
     st.markdown("### 2. Cross-Section Analysis")
     profile.render_profile_section()
     st.markdown("---")
     
-    # Section 3: Optional structural stuff - groin and sill
+    # Section 3: Optional structural elements - groin and sill
     st.markdown("### 3. Structural Elements (Optional)")
     
     # Groin properties in an expandable section 
@@ -137,8 +139,8 @@ elif st.session_state.page == 'project':
     
     st.markdown("---")
     
-    # Section 4: Cost stuff
-    st.markdown("### 2. Cost Estimation")
+    # Section 4: Cost estimation
+    st.markdown("### 4. Cost Estimation")
     cost1, cost2 = st.columns(2)
     with cost1:
         sand_cost = st.number_input("Sand Unit Cost ($/m³)", value=20.0, step=1.0, help="Cost per cubic meter of fill material")
@@ -151,7 +153,7 @@ elif st.session_state.page == 'project':
     if st.button("START CALCULATIONS", type="primary", use_container_width=True):
         st.success("Data received successfully. Processing results...")
         
-        # For now, just showing dummy results. we'll add real calculations later
+        # Note: Currently showing placeholder results. Real calculations will be implemented later.
         st.markdown("#### Results (Real calculations will be implemented)")
         col_res1, col_res2, col_res3 = st.columns(3)
         col_res1.metric("Estimated Sand Volume", "~12,345 m³")

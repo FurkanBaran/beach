@@ -5,6 +5,7 @@ import folium
 from streamlit_folium import st_folium
 import xarray as xr
 import numpy as np
+import os
 
 # ===== HELPER FUNCTIONS =====
 def find_line_intersection(p1, p2, p3, p4):
@@ -56,8 +57,7 @@ def calculate_distance(point1, point2):
 @st.cache_data
 def load_bathymetry():
     try:
-        import os
-        file_name = "final_veri.nc"
+        file_name = "data.nc"
         if os.path.exists(file_name):
             file_path = os.path.abspath(file_name)
         else:
@@ -70,7 +70,7 @@ def load_bathymetry():
     except:
         return None
 
-def extract_depth_profile(ds, point1, point2, num_points=50):
+def extract_depth_profile(ds, point1, point2, num_points=100):
     if ds is None:
         return None, None
     
@@ -88,25 +88,12 @@ def extract_depth_profile(ds, point1, point2, num_points=50):
     distances = R * c
     
     try:
-        # For final_veri.nc: latitude, longitude, label are in data_vars
-        # Find coordinates
-        if 'latitude' in ds.data_vars:
+        # Get coordinates from data_vars (data.nc format)
+        if 'latitude' in ds.data_vars and 'longitude' in ds.data_vars:
             ds_lats = ds['latitude'].values
             ds_lons = ds['longitude'].values
-        elif 'latitude' in ds.coords:
-            ds_lats = ds['latitude'].values
-            ds_lons = ds['longitude'].values
-        elif 'lat' in ds.coords:
-            ds_lats = ds['lat'].values
-            ds_lons = ds['lon'].values
         else:
-            # Last resort: get from coords
-            coords_list = list(ds.coords)
-            if len(coords_list) >= 2:
-                ds_lats = ds[coords_list[0]].values
-                ds_lons = ds[coords_list[1]].values
-            else:
-                return distances.tolist(), [0.0] * len(distances)
+            return distances.tolist(), [0.0] * len(distances)
         
         # Find depth variable
         depth_var = None
@@ -167,14 +154,15 @@ if 'current_section' not in st.session_state:
 if 'coord_version' not in st.session_state:
     st.session_state.coord_version = 0
 
-# Sill line coordinates (constants)
+# New shoreline coordinates (constants)
 NEW_SHORELINE_P1 = {'lat': 41.1775, 'lon': 29.6244}  # 41°10'39"N 29°37'28"E
 NEW_SHORELINE_P2 = {'lat': 41.1747, 'lon': 29.6286}  # 41°10'29"N 29°37'43"E
-SILL_P1 = {'lat': 41.1778, 'lon': 29.6253}  # 41°10'40"N 29°37'31"E
-SILL_P2 = {'lat': 41.1750, 'lon': 29.6292}  # 41°10'30"N 29°37'45"E
+
+# Sill depth constant (meters)
+SILL_DEPTH_TARGET = 2.5  # Target depth for sill location
 
 def render_profile_section():
-    # Initialize session state if not already done
+    # Ensure session state is initialized
     if 'sections' not in st.session_state:
         st.session_state.sections = {
             'A': {'points': [], 'bathy_dist': [], 'bathy_depth': [], 'user_dist': [], 'user_depth': [], 'completed': False},
@@ -231,79 +219,71 @@ def render_profile_section():
         if not completed_sections:
             st.warning("No sections completed yet. Please complete at least one section to view results.")
         else:
-            st.markdown("## All Cross-Section Profiles")
+            # ===== VOLUME CALCULATION SUMMARY =====
+            st.markdown("## 📊 Volume Calculation Summary")
             
-            for sec_name in ['A', 'B', 'C']:
-                sec_data = st.session_state.sections[sec_name]
-                if sec_data['completed']:
-                    st.markdown(f"### Section {sec_name}-{sec_name}'")
-                    
-                    fig = go.Figure()
-                    fig.add_trace(go.Scatter(
-                        x=sec_data['bathy_dist'], 
-                        y=sec_data['bathy_depth'], 
-                        mode='lines+markers', 
-                        name='Bathymetry',
-                        line=dict(color='#0077B6', width=2)
-                    ))
-                    fig.add_trace(go.Scatter(
-                        x=sec_data['user_dist'], 
-                        y=sec_data['user_depth'], 
-                        mode='lines+markers', 
-                        name='Design Profile',
-                        line=dict(color='#FF6B6B', width=2, dash='dash')
-                    ))
-                    
-                    # Mark sill location
-                    if sec_data.get('sill_distance') is not None and sec_data.get('sill_depth') is not None:
-                        # Sill marker (green diamond)
-                        fig.add_trace(go.Scatter(
-                            x=[sec_data['sill_distance']], 
-                            y=[sec_data['sill_depth']], 
-                            mode='markers',
-                            name='Sill Location',
-                            marker=dict(
-                                symbol='diamond',
-                                size=15,
-                                color='#00FF00',
-                                line=dict(color='#006600', width=2)
-                            ),
-                            hovertemplate='Sill Location<br>Distance: %{x:.1f} m<br>Depth: %{y:.2f} m<extra></extra>'
-                        ))
-                        
-                        # Vertical line downward from sill (green)
-                        min_depth = min(min(sec_data['bathy_depth']), min(sec_data['user_depth']))
-                        fig.add_shape(
-                            type="line",
-                            x0=sec_data['sill_distance'],
-                            y0=sec_data['sill_depth'],
-                            x1=sec_data['sill_distance'],
-                            y1=min_depth - 1,  
-                            line=dict(color='#00FF00', width=2, dash='dash')
-                        )
-                    
-                    fig.update_layout(
-                        xaxis_title="Distance (m)", 
-                        yaxis_title="Depth (m)", 
-                        height=350,
-                        legend=dict(x=0.01, y=0.99)
+            vol_results, error = calculate_total_volume()
+            
+            if error:
+                st.warning(f"Volume calculation failed: {error}")
+            else:
+                # Main metrics
+                col_total, col_ab, col_bc = st.columns(3)
+                
+                with col_total:
+                    st.metric(
+                        "🏗️ Total Fill Volume", 
+                        f"{vol_results['total']:,.0f} m³",
+                        help="Total volume of A-B and B-C regions"
                     )
-                    st.plotly_chart(fig)
+                
+                with col_ab:
+                    st.metric(
+                        "A-B Region Volume", 
+                        f"{vol_results['volumes']['A-B']:,.0f} m³"
+                    )
+                
+                with col_bc:
+                    st.metric(
+                        "B-C Region Volume", 
+                        f"{vol_results['volumes']['B-C']:,.0f} m³"
+                    )
+                
+                # Detail table
+                st.markdown("#### Section Details")
+                
+                detail_cols = st.columns(3)
+                for i, sec_name in enumerate(['A', 'B', 'C']):
+                    with detail_cols[i]:
+                        st.markdown(f"**Section {sec_name}-{sec_name}'**")
+                        st.write(f"Fill Area: **{vol_results['areas'][sec_name]:,.1f} m²**")
+                
+                st.markdown("#### Inter-Section Distances")
+                dist_col1, dist_col2 = st.columns(2)
+                with dist_col1:
+                    st.write(f"A ↔ B Distance: **{vol_results['distances']['A-B']:,.1f} m**")
+                with dist_col2:
+                    st.write(f"B ↔ C Distance: **{vol_results['distances']['B-C']:,.1f} m**")
+                
+                st.markdown("---")
+                
+                # Formula explanation
+                with st.expander("📐 Calculation Method"):
+                    st.markdown("""
+                    **Average End Area Method**
                     
-                    col1, col2, col3, col4 = st.columns(4)
-                    with col1:
-                        st.metric("Total Distance", f"{sec_data['bathy_dist'][-1]:.1f} m")
-                    with col2:
-                        st.metric("Max Depth (Bathy)", f"{abs(min(sec_data['bathy_depth'])):.2f} m")
-                    with col3:
-                        st.metric("Max Depth (Design)", f"{abs(min(sec_data['user_depth'])):.2f} m")
-                    with col4:
-                        if sec_data.get('sill_distance') is not None:
-                            st.metric("Sill Distance", f"{sec_data['sill_distance']:.1f} m")
-                        else:
-                            st.metric("Sill Distance", "N/A")
+                    ```
+                    V = (A₁ + A₂) / 2 × L
+                    ```
                     
-                    st.markdown("---")
+                    - **A₁, A₂**: Fill areas of two sections (m²)
+                    - **L**: Distance between sections (m)
+                    - **V**: Volume (m³)
+                    
+                    *Note: This method provides reasonable results even when sections are not parallel.*
+                    """)
+            
+            st.markdown("---")
             
             st.markdown("## Combined View - All Sections")
             
@@ -383,50 +363,18 @@ def render_profile_section():
         ).add_to(m)
         map_colors = {'A': 'blue', 'B': 'green', 'C': 'orange'}
 
-        # Add sill lines to map
-        new_shoreline_p1_list = [NEW_SHORELINE_P1['lat'], NEW_SHORELINE_P1['lon']]
-        new_shoreline_p2_list = [NEW_SHORELINE_P2['lat'], NEW_SHORELINE_P2['lon']]
-        SILL_P1_list = [SILL_P1['lat'], SILL_P1['lon']]
-        SILL_P2_list = [SILL_P2['lat'], SILL_P2['lon']]
+        # Add new shoreline to map
+        new_shoreline_coords = [[NEW_SHORELINE_P1['lat'], NEW_SHORELINE_P1['lon']], 
+                                [NEW_SHORELINE_P2['lat'], NEW_SHORELINE_P2['lon']]]
         
-        folium.PolyLine(
-            [new_shoreline_p1_list, new_shoreline_p2_list],
-            color='green',
-            weight=3,
-            opacity=0.8,
-            popup='New Shoreline (Fill Start)'
-        ).add_to(m)
+        folium.PolyLine(new_shoreline_coords, color='green', weight=3, opacity=0.8,
+                       popup='New Shoreline (Fill Start)').add_to(m)
         
-        folium.PolyLine(
-            [SILL_P1_list, SILL_P2_list],
-            color='green',
-            weight=3,
-            opacity=0.8,
-            dashArray='10, 5',
-            popup='Parabola End (Sill Location)'
-        ).add_to(m)
-        
-        # Add markers to line start and end points
-        folium.Marker(
-            new_shoreline_p1_list,
-            popup='New Shoreline Start',
-            icon=folium.Icon(color='green', icon='info-sign')
-        ).add_to(m)
-        folium.Marker(
-            new_shoreline_p2_list,
-            popup='New Shoreline End',
-            icon=folium.Icon(color='green', icon='info-sign')
-        ).add_to(m)
-        folium.Marker(
-            SILL_P1_list,
-            popup='Sill Line Start',
-            icon=folium.Icon(color='green', icon='info-sign')
-        ).add_to(m)
-        folium.Marker(
-            SILL_P2_list,
-            popup='Sill Line End',
-            icon=folium.Icon(color='green', icon='info-sign')
-        ).add_to(m)
+        # Add markers to shoreline start and end points
+        folium.Marker(new_shoreline_coords[0], popup='New Shoreline Start',
+                     icon=folium.Icon(color='green', icon='info-sign')).add_to(m)
+        folium.Marker(new_shoreline_coords[1], popup='New Shoreline End',
+                     icon=folium.Icon(color='green', icon='info-sign')).add_to(m)
 
         for sec_name, sec_data in st.session_state.sections.items():
             if sec_data['points']:
@@ -526,74 +474,64 @@ def render_profile_section():
                 
                 # Create automatic design profile
                 # Parabola: y = 0.11 * x^0.67
+                # Sill location: where depth reaches 2.5 meters
                 if not section['user_dist']:
-                    # Find intersection points with section line
+                    # Find intersection point with new shoreline
                     section_p1 = section['points'][0]
                     section_p2 = section['points'][1]
                     intersection_start = find_line_intersection(section_p1, section_p2, NEW_SHORELINE_P1, NEW_SHORELINE_P2)
-                    intersection_end = find_line_intersection(section_p1, section_p2, SILL_P1, SILL_P2)
                     
                     # Create design profile from bathymetry profile
                     bathy_dist_array = np.array(section['bathy_dist'])
-                    bathy_depth_array = np.array(section['bathy_depth'])
                     
-                    # Distance points for design profile (same as bathymetry)
-                    section['user_dist'] = bathy_dist_array.tolist()
+                    # Calculate fill start distance (new shoreline intersection)
+                    fill_distance = calculate_distance(section_p1, intersection_start) if intersection_start else 0.0
                     
-                    # Calculate distances to intersection points
-                    fill_distance = 0.0
-                    parabol_end_distance = float('inf')
+                    # Calculate sill distance: where parabola reaches SILL_DEPTH_TARGET (2.5m)
+                    # Formula: y = 0.11 * x^0.67, solve for x when y = 2.5
+                    # x = (y / 0.11)^(1/0.67)
+                    relative_x_sill = (SILL_DEPTH_TARGET / 0.11) ** (1 / 0.67)
+                    sill_distance = fill_distance + relative_x_sill
+                    sill_depth = -SILL_DEPTH_TARGET
                     
-                    if intersection_start:
-                        fill_distance = calculate_distance(section_p1, intersection_start)
+                    # Store sill and fill locations
+                    section['fill_distance'] = fill_distance  # Store original shoreline position
+                    section['sill_distance'] = sill_distance
+                    section['sill_depth'] = sill_depth
                     
-                    if intersection_end:
-                        parabol_end_distance = calculate_distance(section_p1, intersection_end)
+                    # Trim bathymetry profile to sill + buffer distance
+                    buffer_distance = 10  # Show 10 meters after sill
+                    max_distance = sill_distance + buffer_distance
                     
-                    # Calculate depth for each distance point using formula
+                    bathy_dist_trimmed = []
+                    bathy_depth_trimmed = []
+                    for i, x in enumerate(section['bathy_dist']):
+                        if x <= max_distance:
+                            bathy_dist_trimmed.append(x)
+                            bathy_depth_trimmed.append(section['bathy_depth'][i])
+                    
+                    section['bathy_dist'] = bathy_dist_trimmed
+                    section['bathy_depth'] = bathy_depth_trimmed
+                    
+                    # Calculate depth for each distance point using formula (only up to sill)
                     design_depths = []
+                    design_dists = []
                     for x in bathy_dist_array:
-                        if x <= fill_distance:
-                            # 0 meters up to first intersection point (filled area)
-                            design_depths.append(0.0)
-                        elif x <= parabol_end_distance:
-                            # Between first and second intersection points: Parabola
-                            # y = 0.11 * (x - fill_distance)^0.67
-                            relative_x = x - fill_distance
-                            if relative_x > 0:
-                                y = 0.11 * (relative_x ** 0.67)
-                                # Depth should be negative (below sea level)
-                                design_depths.append(-abs(y))
-                            else:
+                        if x <= sill_distance:
+                            design_dists.append(x)
+                            if x <= fill_distance:
+                                # Fill area: 0 depth
                                 design_depths.append(0.0)
-                        else:
-                            # After second intersection point: Continue with sill depth (constant)
-                            if parabol_end_distance < float('inf'):
-                                relative_x_end = parabol_end_distance - fill_distance
-                                if relative_x_end > 0:
-                                    y_end = 0.11 * (relative_x_end ** 0.67)
-                                    # Keep constant depth from sill point
-                                    design_depths.append(-abs(y_end))
+                            else:
+                                # Parabola region
+                                relative_x = x - fill_distance
+                                if relative_x > 0:
+                                    y = 0.11 * (relative_x ** 0.67)
+                                    design_depths.append(-abs(y))
                                 else:
                                     design_depths.append(0.0)
-                            else:
-                                # If no sill point, use bathymetry
-                                idx = np.argmin(np.abs(bathy_dist_array - x))
-                                design_depths.append(bathy_depth_array[idx])
                     
-                    # Save sill location (parabola end point)
-                    if parabol_end_distance < float('inf'):
-                        section['sill_distance'] = parabol_end_distance
-                        relative_x_end = parabol_end_distance - fill_distance
-                        if relative_x_end > 0:
-                            y_end = 0.11 * (relative_x_end ** 0.67)
-                            section['sill_depth'] = -abs(y_end)
-                        else:
-                            section['sill_depth'] = 0.0
-                    else:
-                        section['sill_distance'] = None
-                        section['sill_depth'] = None
-                    
+                    section['user_dist'] = design_dists
                     section['user_depth'] = design_depths
                     section['completed'] = True
                 
@@ -634,7 +572,7 @@ def render_profile_section():
                             line=dict(color='#00FF00', width=2, dash='dash')
                         )
                     
-                    fig2.update_layout(xaxis_title="Distance (m)", yaxis_title="Depth (m)", height=400, legend=dict(x=0.01, y=0.99))
+                    fig2.update_layout(xaxis_title="Distance (m)", yaxis_title="Depth (m)", height=400, legend=dict(x=1.02, y=1, xanchor='left'))
                     st.plotly_chart(fig2)
                     
                     # Show sill information
@@ -642,6 +580,163 @@ def render_profile_section():
                         st.info(f"**Sill Location:** Distance = {section['sill_distance']:.1f} m, Depth = {abs(section['sill_depth']):.2f} m")
                     
                     st.success(f"Section {current}-{current}' saved!")
+                    
+                    # ===== STEP 4: EROSION IMPACT ANALYSIS =====
+                    st.markdown("---")
+                    st.markdown(f"### Step 4: Erosion Impact (30 Years)")
+                    
+                    # Erosion retreat rates (m/year)
+                    RETREAT_RATES = {
+                        'A': 0.7,  # m/year
+                        'B': 0.8,  # m/year
+                        'C': 0.9   # m/year
+                    }
+                    YEARS = 30
+                    
+                    retreat_rate = RETREAT_RATES.get(current, 0.7)
+                    total_retreat = YEARS * retreat_rate  # meters
+                    
+                    # Find original shoreline position from design profile data
+                    # (where depth first becomes negative, i.e., where parabola starts)
+                    x_shore_old = 0.0
+                    user_dist_arr = np.array(section['user_dist'])
+                    user_depth_arr = np.array(section['user_depth'])
+                    for i, depth in enumerate(user_depth_arr):
+                        if depth < 0:  # First negative depth (parabola starts)
+                            if i > 0:
+                                # Use the last zero-depth point as shoreline
+                                x_shore_old = user_dist_arr[i-1]
+                            else:
+                                x_shore_old = user_dist_arr[i]
+                            break
+                    
+                    # New shoreline position after erosion
+                    x_shore_new = x_shore_old - total_retreat
+                    
+                    # Sill remains at same location
+                    x_sill = section['sill_distance']
+                    y_sill = section['sill_depth']
+                    
+                    # Calculate new parabola coefficient
+                    # Formula: y = a * (x - x_shore_new)^0.67
+                    # At sill: y_sill = a * (x_sill - x_shore_new)^0.67
+                    # Therefore: a = y_sill / (x_sill - x_shore_new)^0.67
+                    delta_x = x_sill - x_shore_new
+                    if delta_x > 0:
+                        a_new = y_sill / (delta_x ** 0.67)
+                        
+                        # Generate eroded design profile
+                        eroded_dists = []
+                        eroded_depths = []
+                        
+                        for x in np.linspace(x_shore_new, x_sill, 100):
+                            eroded_dists.append(x)
+                            if x <= x_shore_new:
+                                eroded_depths.append(0.0)
+                            else:
+                                relative_x = x - x_shore_new
+                                y = a_new * (relative_x ** 0.67)
+                                eroded_depths.append(y)  # Already negative
+                        
+                        # Create erosion comparison plot
+                        fig_erosion = go.Figure()
+                        
+                        # Original bathymetry
+                        fig_erosion.add_trace(go.Scatter(
+                            x=section['bathy_dist'], 
+                            y=section['bathy_depth'], 
+                            mode='lines', 
+                            name='Original Bathymetry',
+                            line=dict(color='#0077B6', width=2)
+                        ))
+                        
+                        # Original design profile
+                        fig_erosion.add_trace(go.Scatter(
+                            x=section['user_dist'], 
+                            y=section['user_depth'], 
+                            mode='lines', 
+                            name='Original Design',
+                            line=dict(color='#FF6B6B', width=2, dash='dash')
+                        ))
+                        
+                        # Eroded design profile
+                        fig_erosion.add_trace(go.Scatter(
+                            x=eroded_dists, 
+                            y=eroded_depths, 
+                            mode='lines', 
+                            name=f'After {YEARS}yr Erosion',
+                            line=dict(color='#FFA500', width=3, dash='dot')
+                        ))
+                        
+                        # Mark sill location (same for both)
+                        fig_erosion.add_trace(go.Scatter(
+                            x=[x_sill], 
+                            y=[y_sill], 
+                            mode='markers',
+                            name='Sill Location',
+                            marker=dict(
+                                symbol='diamond',
+                                size=12,
+                                color='green',
+                                line=dict(color='#000000', width=1.5)
+                            ),
+                            hovertemplate='Sill<br>Distance: %{x:.1f} m<br>Depth: %{y:.2f} m<extra></extra>'
+                        ))
+                        
+                        # Vertical line at sill
+                        min_depth = min(min(section['bathy_depth']), min(eroded_depths))
+                        fig_erosion.add_shape(
+                            type="line",
+                            x0=x_sill,
+                            y0=y_sill,
+                            x1=x_sill,
+                            y1=min_depth - 1,
+                            line=dict(color='green', width=2, dash='dash')
+                        )
+                        
+                        # Add vertical line at original shoreline
+                        fig_erosion.add_shape(
+                            type="line",
+                            x0=x_shore_old,
+                            y0=0,
+                            x1=x_shore_old,
+                            y1=min_depth - 1,
+                            line=dict(color='red', width=1, dash='dot')
+                        )
+                        
+                        # Add vertical line at eroded shoreline
+                        fig_erosion.add_shape(
+                            type="line",
+                            x0=x_shore_new,
+                            y0=0,
+                            x1=x_shore_new,
+                            y1=min_depth - 1,
+                            line=dict(color='orange', width=1, dash='dot')
+                        )
+                        
+                        fig_erosion.update_layout(
+                            xaxis_title="Distance (m)", 
+                            yaxis_title="Depth (m)", 
+                            height=450,
+                            legend=dict(x=1.02, y=1, xanchor='left')
+                        )
+                        
+                        st.plotly_chart(fig_erosion)
+                        
+                        # Display erosion metrics
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Erosion Rate", f"{retreat_rate} m/yr")
+                        with col2:
+                            st.metric("Time Period", f"{YEARS} years")
+                        with col3:
+                            st.metric("Total Retreat", f"{total_retreat:.1f} m")
+                        with col4:
+                            st.metric("New Shoreline", f"{x_shore_new:.1f} m")
+                    else:
+                        st.warning("⚠️ Erosion would exceed sill location. Reduce retreat rate or time period.")
+                    
+                    st.markdown("---")
                     
                     _, col_prev, col_next, _ = st.columns([1, 2, 2, 1])
                     with col_prev:
@@ -651,9 +746,140 @@ def render_profile_section():
                                 st.session_state.current_section = prev_sec
                                 st.rerun()
                     with col_next:
-                        if current in ['A', 'B']:
-                            next_sec = 'B' if current == 'A' else 'C'
-                            if st.button(f"Next ({next_sec}) >", key=f"next_{current}", use_container_width=True):
-                                st.session_state.current_section = next_sec
+                        if current == 'A':
+                            if st.button("Next (B) >", key=f"next_{current}", use_container_width=True):
+                                st.session_state.current_section = 'B'
+                                st.rerun()
+                        elif current == 'B':
+                            if st.button("Next (C) >", key=f"next_{current}", use_container_width=True):
+                                st.session_state.current_section = 'C'
+                                st.rerun()
+                        elif current == 'C':
+                            if st.button("All Results >", key=f"next_{current}", use_container_width=True):
+                                st.session_state.current_section = 'ALL'
                                 st.rerun()
     
+
+
+
+
+
+# ===== VOLUME CALCULATION FUNCTIONS =====
+
+def calculate_fill_area(bathy_dist, bathy_depth, design_dist, design_depth, sill_distance=None):
+    """
+    Calculate fill area between bathymetry and design profiles.
+    If sill_distance is provided, calculates only up to that distance
+    
+    """
+    if not bathy_dist or not design_dist:
+        return 0.0
+    
+    common_dist = np.array(bathy_dist)  # Distance values from bathymetry profile
+    design_interp = np.interp(common_dist, design_dist, design_depth)  # Interpolated design depth values
+    bathy_array = np.array(bathy_depth)  # Depth values from bathymetry profile
+    
+    # Extract portion up to sill distance
+    if sill_distance is not None:
+        mask = common_dist <= sill_distance  # Extract portion up to sill distance
+        common_dist = common_dist[mask]  # Distance values up to sill
+        design_interp = design_interp[mask]  # Design depth values up to sill
+        bathy_array = bathy_array[mask]  # Bathymetry depth values up to sill
+    
+    # Calculate fill height (vertical distance from bathymetry to design profile)
+    # Note: Depths are negative (e.g., -5m means 5 meters deep)
+    # If design is shallower (less negative) than bathymetry, we need fill
+    # Example: design = -5m, bathy = -8m, fill_height = -5 - (-8) = 3m (positive = fill needed)
+    # Example: design = -8m, bathy = -5m, fill_height = -8 - (-5) = -3m (negative = cut, not fill)
+    fill_height = design_interp - bathy_array 
+    
+    # Only count positive values (where design is above bathymetry = fill needed)
+    # Negative values mean bathymetry is shallower than design (no fill needed)
+    fill_height = np.maximum(fill_height, 0)
+    
+    # Calculate area using trapezoidal integration
+    if len(common_dist) < 2:
+        return 0.0
+    
+    area = np.trapezoid(fill_height, common_dist)
+    
+    return area
+
+
+def calculate_section_midpoint(points):
+    """
+    Calculate the midpoint of a section line.
+    
+    Args:
+        points: List of two points [{'lat': float, 'lon': float}, ...]
+    
+    Returns:
+        Midpoint coordinates {'lat': float, 'lon': float} or None if insufficient points
+    """
+    if len(points) >= 2:
+        return {
+            'lat': (points[0]['lat'] + points[1]['lat']) / 2,
+            'lon': (points[0]['lon'] + points[1]['lon']) / 2
+        }
+    return None
+
+
+def calculate_total_volume():
+    """
+    Calculate total fill volume between all sections.
+    Uses Average End Area Method: V = (A1 + A2) / 2 * L
+    
+    Returns:
+        Tuple of (results_dict, error_message)
+        - results_dict: Contains 'areas', 'distances', 'volumes', 'total'
+        - error_message: None if successful, error string if failed
+    """
+    sections = st.session_state.sections
+    
+    # Check if all sections are completed
+    completed = {name: data['completed'] for name, data in sections.items()}
+    if not all(completed.values()):
+        missing = [name for name, done in completed.items() if not done]
+        return None, f"Missing sections: {', '.join(missing)}"
+    
+    # Calculate fill area for each section (up to SILL)
+    areas = {}
+    for name, data in sections.items():
+        areas[name] = calculate_fill_area(
+            data['bathy_dist'], data['bathy_depth'],
+            data['user_dist'], data['user_depth'],
+            sill_distance=data['sill_distance']
+        )
+    
+    # Section midpoints
+    midpoints = {name: calculate_section_midpoint(data['points']) 
+                 for name, data in sections.items()}
+    
+    # Inter-section distances
+    dist_AB = calculate_distance(midpoints['A'], midpoints['B'])
+    dist_BC = calculate_distance(midpoints['B'], midpoints['C'])
+    
+    # Calculate volume (Average End Area Method)
+    vol_AB = (areas['A'] + areas['B']) / 2 * dist_AB
+    vol_BC = (areas['B'] + areas['C']) / 2 * dist_BC
+    
+    # Add extra volume for areas outside the drawn sections (estimated)
+    EXTRA_VOLUME = 8.0  # m³ - accounts for fill areas not covered by sections
+    total_volume = vol_AB + vol_BC + EXTRA_VOLUME
+    
+    return {
+        'areas': areas,  # m²
+        'distances': {'A-B': dist_AB, 'B-C': dist_BC},  # m
+        'volumes': {'A-B': vol_AB, 'B-C': vol_BC, 'Extra': EXTRA_VOLUME},  # m³
+        'total': total_volume  # m³
+    }, None
+
+
+def get_volume_results():
+    """
+    Get volume calculation results (called from app.py).
+    
+    Returns:
+        Tuple of (results_dict, error_message) from calculate_total_volume()
+    """
+    return calculate_total_volume()

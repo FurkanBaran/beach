@@ -10,3 +10,6 @@ aciklamalar.md
 .devcontainer/
 *.txt
 *.csv
+images.zip
+ses.py
+.gitignore
